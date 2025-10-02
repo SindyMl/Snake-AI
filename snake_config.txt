@@ -1,0 +1,14 @@
+
+#snake_config.txt
+#Comments are allowed in the file, as are blank lines
+
+num_snakes      8   #add double the number of snakes to the board
+
+#Make the board bigger
+game_width      75 
+game_height     75
+decay_rate	    0.1
+duration	    300
+speed	        50
+num_snakes	    4
+random_seed	    null
