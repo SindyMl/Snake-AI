@@ -1,269 +1,400 @@
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.*;
-
 import za.ac.wits.snake.DevelopmentAgent;
 
 public class MyAgent extends DevelopmentAgent {
-    private Random random = new Random();
-    private int timestep = 0;
-    private int prevAppleX = -1, prevAppleY = -1;
-    private int width = 50, height = 50;
-
-    public static void main(String[] args) {
-        MyAgent agent = new MyAgent();
-        MyAgent.start(agent, args);
-    }
-
+    
+    // Direction constants
+    private static final int UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3;
+    private static final int[] DX = {0, 0, -1, 1};
+    private static final int[] DY = {-1, 1, 0, 0};
+    
     @Override
     public void run() {
         try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
             String initString = br.readLine();
-            if (initString == null)
-                return;
-            String[] initParts = initString.split(" ");
-            int nSnakes = Integer.parseInt(initParts[0]);
-            width = Integer.parseInt(initParts[1]);
-            height = Integer.parseInt(initParts[2]);
-            int mode = Integer.parseInt(initParts[3]);
-
-            System.out.println("log Initialized: " + nSnakes + " snakes, " + width + "x" + height);
-
+            String[] temp = initString.split(" ");
+            int boardWidth = Integer.parseInt(temp[0]);
+            int boardHeight = Integer.parseInt(temp[1]);
+            
             while (true) {
-                String appleLine = br.readLine();
-                if (appleLine == null || appleLine.trim().equals("Game Over")) {
-                    System.out.println("log Game Over after " + timestep + " steps");
+                String line = br.readLine();
+                if (line.contains("Game Over")) {
                     break;
                 }
-                String[] appleParts = appleLine.split(" ");
-                int appleX = Integer.parseInt(appleParts[0]);
-                int appleY = Integer.parseInt(appleParts[1]);
-
-                // Reset on respawn
-                if (appleX != prevAppleX || appleY != prevAppleY) {
-                    timestep = 0;
-                    System.out.println("log Apple respawned - fresh!");
+                
+                // Parse the board info
+                String[] parts = line.split(" ");
+                int appleX = Integer.parseInt(parts[0]);
+                int appleY = Integer.parseInt(parts[1]);
+                int myLength = Integer.parseInt(parts[2]);
+                int myHeadX = Integer.parseInt(parts[3]);
+                int myHeadY = Integer.parseInt(parts[4]);
+                int enemyCount = Integer.parseInt(parts[5]);
+                
+                // Parse my body
+                int[][] myBody = new int[myLength][2];
+                for (int i = 0; i < myLength; i++) {
+                    myBody[i][0] = Integer.parseInt(parts[6 + i * 2]);
+                    myBody[i][1] = Integer.parseInt(parts[6 + i * 2 + 1]);
                 }
-                prevAppleX = appleX;
-                prevAppleY = appleY;
-
-                double appleValue = Math.ceil(5 - 0.1 * timestep);
-                boolean eatApple = appleValue > 0 && appleValue > -4; // Eat positive, avoid <= -4 kill
-                System.out.println("log Apple (" + appleX + "," + appleY + "), value: " + appleValue
-                        + (eatApple ? " (EAT!)" : " (AVOID - shrink/kill)"));
-
-                int mySnakeNum = Integer.parseInt(br.readLine().trim());
-
-                // Parse snakes, build board (Lab 1a matrix)
-                int headX = -1, headY = -1;
-                List<int[]> myBody = new ArrayList<>();
-                List<int[]> allBodies = new ArrayList<>();
-                List<Integer> enemyLengths = new ArrayList<>();
-                int myLength = 0;
-                int[][] board = new int[height][width]; // 0=free, 1=self/short, 2=longer enemy, 3=wall
-
-                for (int i = 0; i < nSnakes; i++) {
-                    String snakeLine = br.readLine().trim();
-                    if (snakeLine.isEmpty() || !snakeLine.startsWith("alive"))
-                        continue;
-
-                    String[] parts = snakeLine.split(" ");
-                    int length = Integer.parseInt(parts[1]);
-                    int kills = Integer.parseInt(parts[2]);
-                    String headStr = parts[3];
-                    String[] headXY = headStr.split(",");
-                    int hx = Integer.parseInt(headXY[0]);
-                    int hy = Integer.parseInt(headXY[1]);
-
-                    List<int[]> body = new ArrayList<>();
-                    body.add(new int[] { hx, hy });
-                    for (int j = 4; j < parts.length; j++) {
-                        String coord = parts[j];
-                        if (coord.isEmpty())
-                            continue;
-                        String[] xy = coord.split(",");
-                        int bx = Integer.parseInt(xy[0]);
-                        int by = Integer.parseInt(xy[1]);
-                        if (by >= 0 && by < height && bx >= 0 && bx < width) {
-                            body.add(new int[] { bx, by });
-                            int cost = (i == mySnakeNum ? 1 : (length > myLength ? 2 : 1));
-                            board[by][bx] = cost;
-                        }
+                
+                // Parse enemies
+                List<int[][]> enemies = new ArrayList<>();
+                int index = 6 + myLength * 2;
+                
+                for (int i = 0; i < enemyCount; i++) {
+                    int enemyLength = Integer.parseInt(parts[index++]);
+                    int[][] enemy = new int[enemyLength][2];
+                    for (int j = 0; j < enemyLength; j++) {
+                        enemy[j][0] = Integer.parseInt(parts[index++]);
+                        enemy[j][1] = Integer.parseInt(parts[index++]);
                     }
-                    allBodies.addAll(body);
-
-                    if (i == mySnakeNum) {
-                        headX = hx;
-                        headY = hy;
-                        myBody = body;
-                        myLength = length;
-                        System.out.println(
-                                "log My: Head (" + headX + "," + headY + "), Len " + length + ", Kills " + kills);
-                    } else {
-                        enemyLengths.add(length);
-                    }
+                    enemies.add(enemy);
                 }
-
-                timestep++;
-
-                if (headX == -1 || headY == -1) {
-                    System.out.println(random.nextInt(4));
-                    continue;
-                }
-
-                // Mark apple if safe
-                if (eatApple && appleY >= 0 && appleY < height && appleX >= 0 && appleX < width) {
-                    board[appleY][appleX] = -1; // Goal (low cost)
-                }
-
-                // Mark walls high cost
-                for (int y = 0; y < height; y++) {
-                    board[y][0] = 3;
-                    board[y][width - 1] = 3;
-                }
-                for (int x = 0; x < width; x++) {
-                    board[0][x] = 3;
-                    board[height - 1][x] = 3;
-                }
-
-                int move = decideMove(headX, headY, appleX, appleY, eatApple, myBody, allBodies, board, myLength);
-
+                
+                System.err.println("MOVE: Head(" + myHeadX + "," + myHeadY + ") Apple(" + appleX + "," + appleY + ") Length=" + myLength + " Enemies=" + enemyCount);
+                
+                // Make intelligent decision with BFS pathfinding
+                int move = makeIntelligentMove(myHeadX, myHeadY, appleX, appleY, myBody, enemies, boardWidth, boardHeight);
+                
+                System.err.println("DECISION: " + move + " (0=up,1=down,2=left,3=right)");
                 System.out.println(move);
-                System.out.println("log T" + timestep + ": Move " + move + " from (" + headX + "," + headY + ")");
             }
         } catch (Exception e) {
-            System.err.println("log Error: " + e.getMessage());
-            System.out.println(random.nextInt(4));
+            System.err.println("Error: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-
-    private int decideMove(int headX, int headY, int appleX, int appleY, boolean eatApple, List<int[]> myBody,
-            List<int[]> allBodies, int[][] board, int myLength) {
-        int currDir = getCurrentDirection(myBody, headX, headY);
-
-        // 1. 2-Step Lookahead: Avoid wall/longer snake in next 2 moves
-        int lookaheadDir = lookaheadSafe(headX, headY, myBody, allBodies, board, myLength);
-        if (lookaheadDir != -1) {
-            System.out.println("log 2-Step Evade: Dir " + lookaheadDir);
-            return lookaheadDir; // Cardinal
-        }
-
-        // 2. PRIORITIZE APPLE: A* shortest, direct first step
-        if (eatApple) {
-            List<int[]> path = aStar(board, new int[] { headY, headX }, new int[] { appleY, appleX }, height, width);
-            if (path != null && path.size() > 1) {
-                int nextX = path.get(1)[1];
-                int nextY = path.get(1)[0];
-                int dir = getCardinalDir(headX, headY, nextX, nextY);
-                System.out.println("log Shortest to apple: " + path.size() + " steps");
-                return dir;
-            } else if (Math.hypot(headX - appleX, headY - appleY) < 10) { // Close
-                int dir = straightToApple(headX, headY, appleX, appleY);
-                System.out.println("log Close apple: straight " + dir);
-                return dir;
+    
+    private int makeIntelligentMove(int headX, int headY, int appleX, int appleY, int[][] myBody, List<int[][]> enemies, int boardWidth, int boardHeight) {
+        // Create board representation with danger zones
+        int[][] board = createBoardWithDangerZones(boardWidth, boardHeight, myBody, enemies);
+        
+        // PRIORITY 1: Avoid immediate death from bigger snakes
+        int[] biggerSnakeThreat = detectBiggerSnakeThreat(headX, headY, enemies, myBody.length);
+        if (biggerSnakeThreat != null) {
+            int escapeMove = findEscapeMove(headX, headY, biggerSnakeThreat, board, boardWidth, boardHeight);
+            if (escapeMove != -1) {
+                System.err.println("ESCAPE: Avoiding bigger snake at (" + biggerSnakeThreat[0] + "," + biggerSnakeThreat[1] + ")");
+                return escapeMove;
             }
         }
-
-        // 3. Respawn Near Apple: If just respawned (dist >30?), head straight to apple
-        if (Math.hypot(headX - appleX, headY - appleY) > 30 && timestep < 5) {
-            int dir = straightToApple(headX, headY, appleX, appleY);
-            System.out.println("log Respawn chase: straight " + dir);
-            return dir;
+        
+        // PRIORITY 2: Aggressive shortest path to apple
+        List<int[]> pathToApple = findShortestPath(headX, headY, appleX, appleY, board, boardWidth, boardHeight);
+        
+        // PRIORITY 3: Look for easy prey (much weaker snakes)
+        int[] crowdTarget = findOptimalHuntingTarget(headX, headY, enemies, myBody.length);
+        List<int[]> pathToCrowd = null;
+        
+        if (crowdTarget != null) {
+            pathToCrowd = findShortestPath(headX, headY, crowdTarget[0], crowdTarget[1], board, boardWidth, boardHeight);
         }
-
-        // 4. Explore open
-        int[] open = findOpenSpace(board);
-        List<int[]> path = aStar(board, new int[] { headY, headX }, new int[] { open[0], open[1] }, height, width);
-        if (path != null && path.size() > 1) {
-            int nextX = path.get(1)[1];
-            int nextY = path.get(1)[0];
-            return getCardinalDir(headX, headY, nextX, nextY);
-        }
-
-        // Fallback safe
-        return randomSafe(headX, headY, myBody, allBodies, board);
+        
+        // Decision logic: Choose optimal strategy with survival priority
+        int move = chooseAggressiveStrategy(headX, headY, pathToApple, pathToCrowd, board, boardWidth, boardHeight);
+        
+        return move;
     }
-
-    // Straight to apple (direct, no diag)
-    private int straightToApple(int hx, int hy, int ax, int ay) {
-        int dx = ax - hx;
-        int dy = ay - hy;
-        if (Math.abs(dx) > Math.abs(dy)) {
-            return dx > 0 ? 3 : 2; // Horizontal first
-        } else {
-            return dy > 0 ? 1 : 0; // Vertical
-        }
-    }
-
-    // Cardinal dir
-    private int getCardinalDir(int cx, int cy, int nx, int ny) {
-        int dx = nx - cx;
-        int dy = ny - cy;
-        if (dx == 0 && dy < 0)
-            return 0;
-        if (dx == 0 && dy > 0)
-            return 1;
-        if (dy == 0 && dx < 0)
-            return 2;
-        if (dy == 0 && dx > 0)
-            return 3;
-        // Approx: Bigger delta
-        if (Math.abs(dx) > Math.abs(dy))
-            return dx > 0 ? 3 : 2;
-        return dy > 0 ? 1 : 0;
-    }
-
-    // 2-Step Lookahead Safe
-    private int lookaheadSafe(int hx, int hy, List<int[]> myBody, List<int[]> allBodies, int[][] board, int myLength) {
-        int[][] dirs = { { 0, -1, 0 }, { 0, 1, 1 }, { -1, 0, 2 }, { 1, 0, 3 } }; // dy, dx, dir
-        int best = -1;
-        int maxSafe = 0;
-        for (int[] d : dirs) {
-            int nx1 = hx + d[1];
-            int ny1 = hy + d[0];
-            if (!isSafe(nx1, ny1, myBody, allBodies, board, myLength))
-                continue;
-
-            int nx2 = nx1 + d[1];
-            int ny2 = ny1 + d[0];
-            int safeSteps = isSafe(nx2, ny2, myBody, allBodies, board, myLength) ? 2 : 1;
-            if (safeSteps > maxSafe) {
-                maxSafe = safeSteps;
-                best = d[2];
+    
+    private int[][] createBoardWithDangerZones(int width, int height, int[][] myBody, List<int[][]> enemies) {
+        int[][] board = new int[width][height];
+        
+        // Mark my body (1 = my body, but tail will move so we can potentially occupy it)
+        for (int i = 0; i < myBody.length - 1; i++) { // Skip tail as it moves
+            if (isInBounds(myBody[i][0], myBody[i][1], width, height)) {
+                board[myBody[i][0]][myBody[i][1]] = 1;
             }
         }
-        return best;
-    }
-
-    private boolean isSafe(int x, int y, List<int[]> myBody, List<int[]> allBodies, int[][] board, int myLength) {
-        if (x < 0 || x >= width || y < 0 || y >= height || board[y][x] >= 2)
-            return false; // Wall/longer
-        return !myBody.stream().anyMatch(p -> p[0] == x && p[1] == y) &&
-                !allBodies.stream().anyMatch(p -> p[0] == x && p[1] == y);
-    }
-
-    private int randomSafe(int hx, int hy, List<int[]> myBody, List<int[]> allBodies, int[][] board) {
-        List<Integer> safe = new ArrayList<>();
-        int[][] dirs = {{0,-1,0}, {0,1,1}, {-1,0,2}, {1,0,3}};
-        for (int[] d : dirs) {
-            int nx = hx + d[1];
-            int ny = hy + d[0];
-            if (isSafe(nx, ny, myBody, allBodies, board, myBody.size())) {
-                safe.add(d[2]);
+        
+        // Mark enemies and their danger zones
+        for (int[][] enemy : enemies) {
+            if (enemy.length == 0) continue;
+            
+            // Mark enemy body (2 = enemy body)
+            for (int[] segment : enemy) {
+                if (isInBounds(segment[0], segment[1], width, height)) {
+                    board[segment[0]][segment[1]] = 2;
+                }
+            }
+            
+            // Mark danger zones around bigger enemy heads (3 = danger zone)
+            if (enemy.length >= myBody.length) {
+                int enemyHeadX = enemy[0][0];
+                int enemyHeadY = enemy[0][1];
+                
+                for (int dir = 0; dir < 4; dir++) {
+                    int dangerX = enemyHeadX + DX[dir];
+                    int dangerY = enemyHeadY + DY[dir];
+                    
+                    if (isInBounds(dangerX, dangerY, width, height) && board[dangerX][dangerY] == 0) {
+                        board[dangerX][dangerY] = 3; // Danger zone
+                    }
+                }
             }
         }
-        return safe.isEmpty() ? random.nextInt(4) : safe.get(random.nextInt(safe.size()));
+        
+        return board;
     }
-
-private int[] findOpenSpace(int[][] board) {
-        int minOcc = Integer.MAX_VALUE;
-        int openX = width / 2, openY = height / 2;
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (board[y][x] == 0) {
-                    int occ = countNearbyOcc(board, x, y);
-                    if (occ < minOcc) {
-                        minOcc = occ;
-                        openX = x;
-                        openY =
+    
+    private int[] detectBiggerSnakeThreat(int headX, int headY, List<int[][]> enemies, int myLength) {
+        int[] closestThreat = null;
+        int minDistance = Integer.MAX_VALUE;
+        
+        for (int[][] enemy : enemies) {
+            if (enemy.length > 0 && enemy.length >= myLength) { // Bigger or equal snakes are threats
+                int enemyHeadX = enemy[0][0];
+                int enemyHeadY = enemy[0][1];
+                int distance = Math.abs(headX - enemyHeadX) + Math.abs(headY - enemyHeadY);
+                
+                // Only consider immediate threats (within 3 moves)
+                if (distance <= 3 && distance < minDistance) {
+                    minDistance = distance;
+                    closestThreat = new int[]{enemyHeadX, enemyHeadY, enemy.length};
+                }
+            }
+        }
+        
+        return closestThreat;
+    }
+    
+    private int findEscapeMove(int headX, int headY, int[] threat, int[][] board, int width, int height) {
+        int threatX = threat[0];
+        int threatY = threat[1];
+        
+        int bestMove = -1;
+        int maxDistance = -1;
+        
+        // Find move that maximizes distance from threat while staying safe
+        for (int dir = 0; dir < 4; dir++) {
+            int newX = headX + DX[dir];
+            int newY = headY + DY[dir];
+            
+            if (isValidEscapeMove(newX, newY, board, width, height)) {
+                int distanceFromThreat = Math.abs(newX - threatX) + Math.abs(newY - threatY);
+                
+                if (distanceFromThreat > maxDistance) {
+                    maxDistance = distanceFromThreat;
+                    bestMove = dir;
+                }
+            }
+        }
+        
+        return bestMove;
+    }
+    
+    private int[] findOptimalHuntingTarget(int headX, int headY, List<int[][]> enemies, int myLength) {
+        int[] bestTarget = null;
+        int bestScore = -1;
+        
+        for (int[][] enemy : enemies) {
+            if (enemy.length > 0 && enemy.length < myLength - 2) { // Only hunt much smaller snakes
+                int enemyHeadX = enemy[0][0];
+                int enemyHeadY = enemy[0][1];
+                int distance = Math.abs(headX - enemyHeadX) + Math.abs(headY - enemyHeadY);
+                
+                // Score based on size difference and proximity
+                int sizeDifference = myLength - enemy.length;
+                int score = sizeDifference * 100 - distance; // Bigger difference and closer = better
+                
+                if (distance <= 6 && score > bestScore) { // Reasonable hunting range
+                    bestScore = score;
+                    bestTarget = new int[]{enemyHeadX, enemyHeadY};
+                }
+            }
+        }
+        
+        return bestTarget;
+    }
+    
+    private int chooseAggressiveStrategy(int headX, int headY, List<int[]> pathToApple, List<int[]> pathToCrowd, int[][] board, int width, int height) {
+        int appleDistance = pathToApple != null ? pathToApple.size() : Integer.MAX_VALUE;
+        int crowdDistance = pathToCrowd != null ? pathToCrowd.size() : Integer.MAX_VALUE;
+        
+        // AGGRESSIVE APPLE FOCUS - prioritize apples more heavily
+        if (appleDistance <= 4) {
+            // Apple is close - go for it aggressively
+            return executePathMove(headX, headY, pathToApple, "AGGRESSIVE_APPLE");
+        } else if (crowdDistance <= 3 && crowdDistance < appleDistance) {
+            // Very close easy prey
+            return executePathMove(headX, headY, pathToCrowd, "QUICK_HUNT");
+        } else if (appleDistance <= 12) {
+            // Apple is reachable - prioritize growth
+            return executePathMove(headX, headY, pathToApple, "APPLE_FOCUS");
+        } else if (crowdDistance < Integer.MAX_VALUE) {
+            // Hunt when apple is far
+            return executePathMove(headX, headY, pathToCrowd, "HUNT_FALLBACK");
+        }
+        
+        // Emergency fallback
+        return findAnySafeMove(headX, headY, board, width, height);
+    }
+    
+    private int executePathMove(int headX, int headY, List<int[]> path, String strategy) {
+        if (path != null && !path.isEmpty()) {
+            int[] nextStep = path.get(0);
+            int moveDir = getDirectionTo(headX, headY, nextStep[0], nextStep[1]);
+            System.err.println(strategy + ": moving " + moveDir + " to (" + nextStep[0] + "," + nextStep[1] + ")");
+            return moveDir;
+        }
+        return -1; // No valid path
+    }
+    
+    private List<int[]> findShortestPath(int startX, int startY, int targetX, int targetY, int[][] board, int width, int height) {
+        if (startX == targetX && startY == targetY) {
+            return new ArrayList<>(); // Already at target
+        }
+        
+        // Aggressive BFS - prioritize speed over extreme safety
+        Queue<int[]> queue = new LinkedList<>();
+        boolean[][] visited = new boolean[width][height];
+        int[][][] parent = new int[width][height][2];
+        
+        queue.offer(new int[]{startX, startY, 0}); // x, y, distance
+        visited[startX][startY] = true;
+        parent[startX][startY] = new int[]{-1, -1}; // No parent for start
+        
+        while (!queue.isEmpty()) {
+            int[] current = queue.poll();
+            int x = current[0], y = current[1], dist = current[2];
+            
+            if (x == targetX && y == targetY) {
+                // Reconstruct path
+                return reconstructPath(parent, startX, startY, targetX, targetY);
+            }
+            
+            // Try all 4 directions with priority (toward target first)
+            int[] dirPriority = getDirectionPriority(x, y, targetX, targetY);
+            
+            for (int i = 0; i < 4; i++) {
+                int dir = dirPriority[i];
+                int newX = x + DX[dir];
+                int newY = y + DY[dir];
+                
+                if (isAggressiveValidMove(newX, newY, board, width, height) && !visited[newX][newY]) {
+                    visited[newX][newY] = true;
+                    parent[newX][newY] = new int[]{x, y};
+                    queue.offer(new int[]{newX, newY, dist + 1});
+                }
+            }
+        }
+        
+        return null; // No path found
+    }
+    
+    private int[] getDirectionPriority(int x, int y, int targetX, int targetY) {
+        // Prioritize directions that get us closer to target
+        List<Integer> primary = new ArrayList<>();
+        List<Integer> secondary = new ArrayList<>();
+        
+        if (targetX > x) primary.add(RIGHT);
+        else if (targetX < x) primary.add(LEFT);
+        
+        if (targetY > y) primary.add(DOWN);
+        else if (targetY < y) primary.add(UP);
+        
+        // Add remaining directions as secondary
+        for (int dir = 0; dir < 4; dir++) {
+            if (!primary.contains(dir)) {
+                secondary.add(dir);
+            }
+        }
+        
+        // Combine lists
+        primary.addAll(secondary);
+        return primary.stream().mapToInt(i -> i).toArray();
+    }
+    
+    private boolean isAggressiveValidMove(int x, int y, int[][] board, int width, int height) {
+        if (!isInBounds(x, y, width, height)) return false;
+        
+        // Aggressive: allow movement through some danger zones if necessary for apple
+        return board[x][y] == 0 || board[x][y] == 3; // Allow empty space or danger zones
+    }
+    
+    private boolean isValidEscapeMove(int x, int y, int[][] board, int width, int height) {
+        if (!isInBounds(x, y, width, height)) return false;
+        
+        // Conservative: avoid all danger zones when escaping
+        return board[x][y] == 0; // Only empty spaces
+    }
+    
+    private List<int[]> reconstructPath(int[][][] parent, int startX, int startY, int endX, int endY) {
+        List<int[]> path = new ArrayList<>();
+        int x = endX, y = endY;
+        
+        while (x != startX || y != startY) {
+            path.add(0, new int[]{x, y});
+            int[] p = parent[x][y];
+            x = p[0];
+            y = p[1];
+        }
+        
+        return path;
+    }
+    
+    private int getDirectionTo(int fromX, int fromY, int toX, int toY) {
+        if (toX > fromX) return RIGHT;
+        if (toX < fromX) return LEFT;
+        if (toY > fromY) return DOWN;
+        if (toY < fromY) return UP;
+        return UP; // Fallback
+    }
+    
+    private int findAnySafeMove(int headX, int headY, int[][] board, int width, int height) {
+        // Try to find safest move (prefer moves away from danger)
+        int bestMove = -1;
+        int bestSafety = -1;
+        
+        for (int dir = 0; dir < 4; dir++) {
+            int newX = headX + DX[dir];
+            int newY = headY + DY[dir];
+            
+            if (isValidMove(newX, newY, board, width, height)) {
+                int safety = calculateSafetyScore(newX, newY, board, width, height);
+                if (safety > bestSafety) {
+                    bestSafety = safety;
+                    bestMove = dir;
+                }
+            }
+        }
+        
+        if (bestMove != -1) {
+            System.err.println("SAFE MOVE: dir=" + bestMove + " safety=" + bestSafety);
+            return bestMove;
+        }
+        
+        System.err.println("NO SAFE MOVES - EMERGENCY");
+        return UP; // Last resort
+    }
+    
+    private int calculateSafetyScore(int x, int y, int[][] board, int width, int height) {
+        int score = 0;
+        
+        // Check surrounding area for safety
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                int checkX = x + dx;
+                int checkY = y + dy;
+                
+                if (isInBounds(checkX, checkY, width, height)) {
+                    if (board[checkX][checkY] == 0) score += 1; // Empty space
+                    else if (board[checkX][checkY] == 3) score -= 2; // Danger zone
+                    else score -= 1; // Obstacle
+                }
+            }
+        }
+        
+        return score;
+    }
+    
+    private boolean isValidMove(int x, int y, int[][] board, int width, int height) {
+        return isInBounds(x, y, width, height) && board[x][y] == 0;
+    }
+    
+    private boolean isInBounds(int x, int y, int width, int height) {
+        return x >= 0 && x < width && y >= 0 && y < height;
+    }
+}
