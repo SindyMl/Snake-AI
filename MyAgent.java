@@ -1,4 +1,4 @@
-﻿import java.io.BufferedReader;
+import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.*;
 import za.ac.wits.snake.DevelopmentAgent;
@@ -24,8 +24,7 @@ public class MyAgent extends DevelopmentAgent {
 
             while (true) {
                 String line = br.readLine();
-                if (line.contains("Game Over"))
-                    break;
+                if (line.contains("Game Over")) break;
 
                 String[] appleCoords = line.split(" ");
                 int appleX = Integer.parseInt(appleCoords[0]);
@@ -76,11 +75,10 @@ public class MyAgent extends DevelopmentAgent {
     }
 
     private List<Point> reconstructFullBody(List<Point> kinks, int length) {
-        if (kinks.isEmpty())
-            return new ArrayList<>();
+        if (kinks.isEmpty()) return new ArrayList<>();
 
         List<Point> fullBody = new ArrayList<>();
-
+        
         for (int i = 0; i < kinks.size() - 1; i++) {
             Point start = kinks.get(i);
             Point end = kinks.get(i + 1);
@@ -116,10 +114,8 @@ public class MyAgent extends DevelopmentAgent {
         }
     }
 
-    private int calculateMove(Snake mySnake, Snake[] allSnakes, int appleX, int appleY, int appleAge, int boardWidth,
-            int boardHeight) {
-        if (mySnake == null || !mySnake.alive)
-            return 0;
+    private int calculateMove(Snake mySnake, Snake[] allSnakes, int appleX, int appleY, int appleAge, int boardWidth, int boardHeight) {
+        if (mySnake == null || !mySnake.alive) return 0;
 
         Point head = mySnake.getHead();
         int[] dx = { 0, 0, -1, 1 };
@@ -141,26 +137,24 @@ public class MyAgent extends DevelopmentAgent {
         return bestMove;
     }
 
-    private int evaluateMove(Point newPos, Snake mySnake, Snake[] allSnakes, int appleX, int appleY, int appleAge,
-            int boardWidth, int boardHeight) {
+    private int evaluateMove(Point newPos, Snake mySnake, Snake[] allSnakes, int appleX, int appleY, int appleAge, int boardWidth, int boardHeight) {
         if (newPos.x < 0 || newPos.x >= boardWidth || newPos.y < 0 || newPos.y >= boardHeight) {
             return -10000;
         }
 
         for (Snake snake : allSnakes) {
-            if (snake == null || !snake.alive)
-                continue;
-
+            if (snake == null || !snake.alive) continue;
+            
             for (int i = 0; i < snake.body.size(); i++) {
                 Point bodyPart = snake.body.get(i);
-
+                
                 if (snake == mySnake && i == snake.body.size() - 1) {
                     int appleDistance = Math.abs(appleX - mySnake.getHead().x) + Math.abs(appleY - mySnake.getHead().y);
                     if (appleDistance > 1) {
                         continue;
                     }
                 }
-
+                
                 if (newPos.equals(bodyPart)) {
                     return -8000;
                 }
@@ -168,8 +162,7 @@ public class MyAgent extends DevelopmentAgent {
         }
 
         for (Snake snake : allSnakes) {
-            if (snake == null || !snake.alive || snake == mySnake)
-                continue;
+            if (snake == null || !snake.alive || snake == mySnake) continue;
 
             Point enemyHead = snake.getHead();
             int distance = manhattanDistance(newPos, enemyHead);
@@ -195,17 +188,16 @@ public class MyAgent extends DevelopmentAgent {
 
         int appleDistance = manhattanDistance(newPos, new Point(appleX, appleY));
         double appleValue = Math.max(1.0, 5.0 - (appleAge * 0.1));
-
+        
         if (appleValue >= 3.0) {
-            score += Math.max(0, (int) (150 * appleValue) - appleDistance * 10);
+            score += Math.max(0, (int)(150 * appleValue) - appleDistance * 10);
         } else if (appleValue >= 1.0) {
-            score += Math.max(0, (int) (100 * appleValue) - appleDistance * 6);
+            score += Math.max(0, (int)(100 * appleValue) - appleDistance * 6);
         } else {
             score += appleDistance * 2;
         }
 
-        int wallDistance = Math.min(Math.min(newPos.x, boardWidth - 1 - newPos.x),
-                Math.min(newPos.y, boardHeight - 1 - newPos.y));
+        int wallDistance = Math.min(Math.min(newPos.x, boardWidth - 1 - newPos.x), Math.min(newPos.y, boardHeight - 1 - newPos.y));
         score += wallDistance * 8;
 
         score += calculateAvailableSpace(newPos, allSnakes, boardWidth, boardHeight) * 3;
@@ -221,8 +213,7 @@ public class MyAgent extends DevelopmentAgent {
         boolean[][] occupied = new boolean[boardWidth][boardHeight];
 
         for (Snake snake : allSnakes) {
-            if (snake == null || !snake.alive)
-                continue;
+            if (snake == null || !snake.alive) continue;
             for (Point body : snake.body) {
                 if (body.x >= 0 && body.x < boardWidth && body.y >= 0 && body.y < boardHeight) {
                     occupied[body.x][body.y] = true;
@@ -248,8 +239,7 @@ public class MyAgent extends DevelopmentAgent {
                 int nx = current.x + dx[i];
                 int ny = current.y + dy[i];
 
-                if (nx >= 0 && nx < boardWidth && ny >= 0 && ny < boardHeight && !visited[nx][ny]
-                        && !occupied[nx][ny]) {
+                if (nx >= 0 && nx < boardWidth && ny >= 0 && ny < boardHeight && !visited[nx][ny] && !occupied[nx][ny]) {
                     visited[nx][ny] = true;
                     queue.offer(new Point(nx, ny));
                 }
@@ -261,41 +251,27 @@ public class MyAgent extends DevelopmentAgent {
 
     private static class Point {
         int x, y;
-
-        Point(int x, int y) {
-            this.x = x;
-            this.y = y;
-        }
-
+        Point(int x, int y) { this.x = x; this.y = y; }
         @Override
         public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null || getClass() != obj.getClass())
-                return false;
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
             Point point = (Point) obj;
             return x == point.x && y == point.y;
         }
-
         @Override
-        public int hashCode() {
-            return Objects.hash(x, y);
-        }
+        public int hashCode() { return Objects.hash(x, y); }
     }
 
     private static class Snake {
         boolean alive;
         int length;
         List<Point> body;
-
         Snake(boolean alive, int length, List<Point> body) {
             this.alive = alive;
             this.length = length;
             this.body = body;
         }
-
-        Point getHead() {
-            return body.isEmpty() ? new Point(0, 0) : body.get(0);
-        }
+        Point getHead() { return body.isEmpty() ? new Point(0, 0) : body.get(0); }
     }
 }
