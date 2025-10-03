@@ -1,0 +1,5 @@
+Error: Could not find or load main class MyAgent
+Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
+Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
+Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
+Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgent

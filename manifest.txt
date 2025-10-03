@@ -1,0 +1,2 @@
+Main-Class: MyAgent
+Class-Path: ../lib/SnakeRunner.jar
