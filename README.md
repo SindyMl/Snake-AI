@@ -1,48 +1,4 @@
-# Snake AI - Advanced Competitive Agent
 
-## 🐍 **Production-Ready Snake AI with Advanced Techniques**
-
-This repository contains a sophisticated AI agent for the multiplayer Snake competition, implementing advanced game theory, pathfinding, and strategic decision-making algorithms.
-
-### 🚀 **Enhanced Features & Advanced AI Techniques:**
-
-#### **🎯 Apple Tracking & Hunting System**
-- **Real-Time Apple Age Tracking**: Tracks apple respawn and aging with precise value calculation
-- **Dynamic Apple Value**: Fresh apples (5.0 value) decrease over time (5.0 - 0.1*age)
-- **Immediate Direction Change**: Snake instantly redirects to new apple locations upon respawn
-- **Aggressive Pursuit Logic**: High-value apples get 150x multiplier scoring for immediate chase
-- **Smart Apple Abandonment**: Avoids poisoned/old apples (negative value) intelligently
-
-#### **⚔️ Crowd Hunting Implementation** 
-- **Predator Mode**: Actively hunts snakes smaller than itself (+200 bonus within 2 spaces)
-- **Prey Mode**: Strategically avoids longer snakes (-9000 penalty at distance 1)
-- **Pack Hunting**: Coordinates with other hunters for maximum efficiency
-- **Head-to-Head Combat**: Advanced collision prediction and avoidance
-
-#### **🧠 Advanced Body Reconstruction**
-- **Kink-Based Parsing**: Correctly interprets coordinate chains as direction changes
-- **Full Body Reconstruction**: Draws line segments between kinks to build complete body
-- **Precise Length Matching**: Ensures exact snake length as specified by game engine
-- **Smart Tail Logic**: Only avoids own tail when actually growing (apple distance ≤ 1)
-
-#### **🛡️ Multi-Layered Safety System**
-- **Primary Safety**: Wall (-10000) and body collision (-8000) prevention
-- **Danger Zones**: Graduated threat assessment for enemy snakes by distance
-- **Escape Route Planning**: Flood-fill space calculation maintains multiple movement options
-- **Territory Control**: Prioritizes moves with maximum available space (+3 per space)
-
-#### **⚡ Real-Time Strategic Decision Making**
-   - **Hunt Mode**: Actively pursues smaller snakes for kills
-   - **Evasion Mode**: Sophisticated avoidance of longer/equal length snakes
-   - **Crowd Hunting**: Coordinated strategies against multiple opponents
-
-6. **Production-Ready Architecture**
-   - **Clean I/O Protocol**: No System.err interference with game communication
-   - **Robust Error Handling**: Graceful degradation on parsing errors
-   - **Optimized Performance**: Sub-millisecond decision making
-   - **JAR Deployment Ready**: Complete class packaging for competition
-
----
 
 # How it Works
 [This a working document. There are probably many typos. Apologies.]

@@ -1,5 +1,1 @@
-Error: Could not find or load main class MyAgent
-Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
-Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
-Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgentError: Could not find or load main class MyAgent
-Caused by: java.lang.NoClassDefFoundError: za/ac/wits/snake/DevelopmentAgent
+no main manifest attribute, in C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.jarno main manifest attribute, in C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.jarError: Invalid or corrupt jarfile C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.javano main manifest attribute, in C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.jarno main manifest attribute, in C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.jarno main manifest attribute, in C:\Users\chant\Documents\GitHub\Snake-AI\src/MyAgent.jar
