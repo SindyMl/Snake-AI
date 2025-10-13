@@ -1,0 +1,23 @@
+# Java compiled files
+*.class
+
+# JAR files (except in submissions folder)
+/*.jar
+/src/*.jar
+
+# Temporary files
+*.txt~
+err.txt
+out.txt
+
+# IDE files
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backup files
+*_backup.*
+*.bak

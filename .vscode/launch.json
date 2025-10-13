@@ -1,13 +1,14 @@
 {
-"version": "0.2.0",
-"configurations": [
-    {
-        "type": "java",
-        "name": "Launch MyAgent",
-        "request": "launch",
-        "mainClass": "MyAgent",
-        "vmArgs": "-cp lib/SnakeRunner.jar",
-        "args": "-develop"
-    }
-]
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Launch MyAgent",
+            "request": "launch",
+            "mainClass": "MyAgent",
+            "projectName": "Snake-AI",
+            "cwd": "${workspaceFolder}",
+            "args": "-develop"
+        }
+    ]
 }
