@@ -4,35 +4,40 @@ import java.util.*;
 import za.ac.wits.snake.DevelopmentAgent;
 
 /**
- * ELITE SNAKE AI - TOURNAMENT GRADE
+ * ELITE SNAKE AI - TOURNAMENT MASTERY EDITION (50ms Optimized)
  * 
- * Core Strategy Philosophy:
- * 1. AGGRESSIVE apple collection with smart competition analysis
- * 2. RUTHLESS hunting of shorter snakes when safe
- * 3. DEFENSIVE evasion from longer snakes with escape routes
- * 4. BFS pathfinding as PRIMARY strategy
- * 5. Hamiltonian cycle as EMERGENCY fallback only
- * 6. Space preservation is NON-NEGOTIABLE
+ * KEY INSIGHT: Moves execute every 50ms regardless of algorithm speed
+ * STRATEGY: Maximize decision quality, not speed
+ * 
+ * OPTIMIZATIONS FOR 50ms BUDGET:
+ * 1. Deep look-ahead (3-step simulation instead of 2)
+ * 2. Enhanced opponent prediction with probability distribution
+ * 3. Multi-scenario evaluation for risky moves
+ * 4. Refined space calculation with territory control
+ * 5. Advanced hunt mechanics with escape route blocking
+ * 6. Strategic apple prioritization based on game state
+ * 7. Dynamic aggression tuning based on position strength
  */
 public class MyAgent extends DevelopmentAgent {
 
     private int[] dx = { 0, 0, -1, 1 };
     private int[] dy = { -1, 1, 0, 0 };
     private boolean[][] visited;
-    private int[][] gameBoard;
     private int boardWidth, boardHeight;
-    private Random random = new Random();
 
-    // Pathfinding structures
-    private List<Point> hamiltonianCycle;
-    private boolean useHamiltonian = false;
-    private Queue<Point> bfsQueue = new LinkedList<>();
-    private int[][] bfsDistance;
-    private Point[][] bfsParent;
+    // Performance tracking for 50ms budget
+    private long moveStartTime = 0;
+    private static final long MAX_DECISION_TIME_MS = 45; // Leave 5ms safety margin
 
-    // Game state tracking
     private int turnCount = 0;
-    private int lastAppleEatenTurn = 0;
+    private Point lastApple = null;
+    private int appleTurnCounter = 0;
+
+    private Map<Integer, SnakeProfile> profiles = new HashMap<>();
+    private Random random = new Random();
+    private List<Point> hamiltonCycle;
+    private Map<Point, Integer> spaceCache = new HashMap<>();
+    private int lastCacheTurn = -1;
 
     public static void main(String args[]) {
         MyAgent agent = new MyAgent();
@@ -49,15 +54,7 @@ public class MyAgent extends DevelopmentAgent {
             boardHeight = Integer.parseInt(temp[2]);
 
             visited = new boolean[boardWidth][boardHeight];
-            gameBoard = new int[boardWidth][boardHeight];
-            bfsDistance = new int[boardWidth][boardHeight];
-            bfsParent = new Point[boardWidth][boardHeight];
-
-            hamiltonianCycle = generateHamiltonianCycle();
-            useHamiltonian = (hamiltonianCycle != null && hamiltonianCycle.size() > 0);
-
-            int appleAge = 0;
-            int lastAppleX = -1, lastAppleY = -1;
+            hamiltonCycle = generateHamiltonCycle();
 
             while (true) {
                 String line = br.readLine();
@@ -66,17 +63,21 @@ public class MyAgent extends DevelopmentAgent {
 
                 turnCount++;
 
+                if (lastCacheTurn != turnCount) {
+                    spaceCache.clear();
+                    lastCacheTurn = turnCount;
+                }
+
                 String[] appleCoords = line.split(" ");
                 int appleX = Integer.parseInt(appleCoords[0]);
                 int appleY = Integer.parseInt(appleCoords[1]);
+                Point apple = new Point(appleX, appleY);
 
-                // Apple respawn detection
-                if (appleX != lastAppleX || appleY != lastAppleY) {
-                    appleAge = 0;
-                    lastAppleX = appleX;
-                    lastAppleY = appleY;
+                if (lastApple == null || !apple.equals(lastApple)) {
+                    appleTurnCounter = 0;
+                    lastApple = apple;
                 } else {
-                    appleAge++;
+                    appleTurnCounter++;
                 }
 
                 int mySnakeNum = Integer.parseInt(br.readLine());
@@ -86,7 +87,8 @@ public class MyAgent extends DevelopmentAgent {
                     snakes[i] = parseSnake(br.readLine());
                 }
 
-                int move = calculateOptimalMove(snakes[mySnakeNum], snakes, appleX, appleY, appleAge);
+                updateProfiles(snakes);
+                int move = decideMove(snakes[mySnakeNum], snakes, mySnakeNum, apple);
                 System.out.println(move);
             }
         } catch (Exception e) {
@@ -94,781 +96,1003 @@ public class MyAgent extends DevelopmentAgent {
         }
     }
 
-    /**
-     * MASTER DECISION ENGINE
-     * Prioritizes aggressive apple collection while maintaining survival
-     */
-    private int calculateOptimalMove(Snake mySnake, Snake[] allSnakes, int appleX, int appleY, int appleAge) {
-        if (mySnake == null || !mySnake.alive || mySnake.body == null || mySnake.body.isEmpty()) {
+    private List<Point> generateHamiltonCycle() {
+        List<Point> cycle = new ArrayList<>();
+        for (int y = 0; y < boardHeight; y++) {
+            if (y % 2 == 0) {
+                for (int x = 0; x < boardWidth; x++) {
+                    cycle.add(new Point(x, y));
+                }
+            } else {
+                for (int x = boardWidth - 1; x >= 0; x--) {
+                    cycle.add(new Point(x, y));
+                }
+            }
+        }
+        return cycle;
+    }
+
+    private void updateProfiles(Snake[] snakes) {
+        profiles.clear();
+        for (int i = 0; i < snakes.length; i++) {
+            if (snakes[i] != null && snakes[i].alive) {
+                SnakeProfile p = new SnakeProfile();
+                p.size = snakes[i].body.size();
+                p.kills = snakes[i].kills;
+                profiles.put(i, p);
+            }
+        }
+    }
+
+    private int decideMove(Snake me, Snake[] all, int myIdx, Point apple) {
+        if (me == null || !me.alive || me.body.isEmpty())
             return 0;
+
+        Point head = me.body.get(0);
+        int appleVal = (int) Math.ceil(5.0 - (appleTurnCounter * 0.1));
+
+        if (isInImmediateDanger(me, all, myIdx)) {
+            int escape = enhancedEmergencyEscape(me, all, myIdx);
+            if (escape != -1)
+                return escape;
         }
 
-        Point head = mySnake.body.get(0);
-        if (head == null) {
+        if (appleVal <= -4) {
+            if (!hasSignificantLead(me, all, 5)) {
+                return moveAwayFrom(head, apple, me, all, myIdx);
+            }
+        } else if (appleVal >= -3 && appleVal < 0) {
+            if (!hasSignificantLead(me, all, 3)) {
+                return moveAwayFrom(head, apple, me, all, myIdx);
+            }
+        }
+
+        if (appleVal >= 1 && !willLoseAtApple(me, apple, all, myIdx)) {
+            List<Point> path = findPathBFS(head, apple, me, all, myIdx);
+            if (path != null && path.size() > 1 && isPathSurvivable(path, me, all, myIdx)) {
+                Point next = path.get(1);
+                int move = getDir(head, next);
+                if (move != -1 && isMoveValid(me, next, all, myIdx)) {
+                    return move;
+                }
+            }
+
+            int hamiltonMove = findHamiltonMove(me, apple, all, myIdx);
+            if (hamiltonMove != -1)
+                return hamiltonMove;
+
+            path = findPathAStar(head, apple, me, all, myIdx);
+            if (path != null && path.size() > 1 && isPathSurvivable(path, me, all, myIdx)) {
+                Point next = path.get(1);
+                int move = getDir(head, next);
+                if (move != -1 && isMoveValid(me, next, all, myIdx)) {
+                    return move;
+                }
+            }
+
+            int spiralMove = getTrueSpiralMove(me, apple, all, myIdx);
+            if (spiralMove != -1)
+                return spiralMove;
+        }
+
+        if (appleVal >= 1 && me.body.size() >= 5) {
+            Snake target = findEasyTarget(me, all, myIdx);
+            if (target != null) {
+                int huntMove = simpleHunt(me, target, all, myIdx);
+                if (huntMove != -1)
+                    return huntMove;
+            }
+        }
+
+        return findBestSafeMove(me, all, myIdx, apple, appleVal);
+    }
+
+    private boolean hasSignificantLead(Snake me, Snake[] all, int leadAmount) {
+        for (Snake s : all) {
+            if (s != null && s.alive && s != me) {
+                if (me.body.size() <= s.body.size() + leadAmount) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private int countSpace(Point start, Snake me, Snake[] all, int myIdx) {
+        if (!inBounds(start))
             return 0;
+
+        if (spaceCache.containsKey(start)) {
+            return spaceCache.get(start);
         }
 
-        // Calculate apple value with proper rounding
-        double rawAppleValue = 5.0 - (appleAge * 0.1);
-        int appleValue = (int) Math.ceil(rawAppleValue);
+        Queue<Point> q = new LinkedList<>();
+        boolean[][] vis = new boolean[boardWidth][boardHeight];
 
-        // Setup game board
-        setupGameBoardEfficiently(allSnakes);
-
-        // ==================================================================
-        // PHASE 1: ABSOLUTE EMERGENCY ESCAPE (life or death)
-        // ==================================================================
-        if (isInAbsoluteDanger(mySnake, allSnakes)) {
-            int emergencyMove = findAbsoluteEmergencyEscape(mySnake, allSnakes);
-            if (emergencyMove != -1) {
-                Point emergencyHead = calculateNewHead(mySnake, emergencyMove);
-                if (emergencyHead != null && isMoveSafe(mySnake, emergencyHead, allSnakes)) {
-                    int emergencySpace = calculateReachableSpaceOptimized(emergencyHead);
-                    if (emergencySpace >= 2) { // Accept minimal space in emergency
-                        return emergencyMove;
-                    }
+        for (int i = 0; i < all.length; i++) {
+            if (all[i] != null && all[i].alive && all[i].body != null) {
+                int stopIndex = (i == myIdx) ? all[i].body.size() : all[i].body.size() - 1;
+                for (int j = 0; j < stopIndex; j++) {
+                    Point p = all[i].body.get(j);
+                    if (inBounds(p))
+                        vis[p.x][p.y] = true;
                 }
             }
         }
 
-        // ==================================================================
-        // PHASE 2: AGGRESSIVE APPLE PURSUIT (primary objective)
-        // ==================================================================
-        if (appleValue >= 1) {
-            // Calculate distance to apple
-            int distToApple = Math.abs(head.x - appleX) + Math.abs(head.y - appleY);
+        q.offer(start);
+        vis[start.x][start.y] = true;
+        int count = 0;
 
-            // CRITICAL: If we're very close to apple, GO FOR IT unless deadly
-            if (distToApple <= 2 && appleValue >= 2) {
-                int directMove = findDirectPathToApple(head, appleX, appleY, mySnake, allSnakes);
-                if (directMove != -1) {
-                    Point directHead = calculateNewHead(mySnake, directMove);
-                    if (directHead != null && isMoveSafe(mySnake, directHead, allSnakes)) {
-                        int directSpace = calculateReachableSpaceOptimized(directHead);
+        while (!q.isEmpty()) {
+            Point cur = q.poll();
+            count++;
 
-                        // Aggressive apple grab - only check minimal safety
-                        if (directSpace >= mySnake.body.size() * 0.3) {
-                            // Check if we'll win head-on collision
-                            if (!willLoseHeadOnAtApple(directHead, appleX, appleY, mySnake, allSnakes)) {
-                                return directMove;
-                            }
-                        }
-                    }
-                }
-            }
+            for (int i = 0; i < 4; i++) {
+                int nx = cur.x + dx[i];
+                int ny = cur.y + dy[i];
 
-            // Use BFS for optimal pathfinding
-            List<Point> bfsPath = findBFSPath(head, new Point(appleX, appleY), allSnakes);
-            if (bfsPath != null && bfsPath.size() > 1) {
-                Point nextStep = bfsPath.get(1);
-                int bfsMove = getDirectionToPoint(head, nextStep);
-
-                if (bfsMove != -1 && isMoveSafe(mySnake, nextStep, allSnakes)) {
-                    int pathSpace = calculateReachableSpaceOptimized(nextStep);
-
-                    // Aggressive space threshold - don't be too cautious
-                    if (pathSpace >= mySnake.body.size() * 0.4) {
-                        // Additional safety: check if path is relatively clear
-                        if (!isPathBlockedByLongerSnake(bfsPath, mySnake, allSnakes, 3)) {
-                            return bfsMove;
-                        }
-                    }
+                if (inBounds(new Point(nx, ny)) && !vis[nx][ny]) {
+                    vis[nx][ny] = true;
+                    q.offer(new Point(nx, ny));
                 }
             }
         }
 
-        // ==================================================================
-        // PHASE 3: HUNTING MODE (kill shorter snakes for advantage)
-        // ==================================================================
-        Snake huntTarget = findBestHuntingOpportunity(head, mySnake, allSnakes, appleX, appleY);
-        if (huntTarget != null && appleValue >= 2) {
-            int huntMove = findHuntingMove(head, huntTarget, mySnake, allSnakes);
-            if (huntMove != -1) {
-                Point huntHead = calculateNewHead(mySnake, huntMove);
-                if (huntHead != null && isMoveSafe(mySnake, huntHead, allSnakes)) {
-                    int huntSpace = calculateReachableSpaceOptimized(huntHead);
-
-                    // Ensure hunting doesn't trap us
-                    if (huntSpace >= mySnake.body.size() * 0.5) {
-                        return huntMove;
-                    }
-                }
-            }
-        }
-
-        // ==================================================================
-        // PHASE 4: COMPREHENSIVE MOVE EVALUATION
-        // ==================================================================
-        int bestMove = -1;
-        int bestScore = Integer.MIN_VALUE;
-
-        for (int move = 0; move < 4; move++) {
-            Point newHead = calculateNewHead(mySnake, move);
-
-            if (newHead == null || !isMoveSafe(mySnake, newHead, allSnakes)) {
-                continue;
-            }
-
-            int score = evaluateMove(newHead, mySnake, allSnakes, appleX, appleY, appleValue);
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
-            }
-        }
-
-        // ==================================================================
-        // PHASE 5: HAMILTONIAN FALLBACK (safe survival mode)
-        // ==================================================================
-        if (bestMove == -1 && useHamiltonian) {
-            int hamiltonianMove = getHamiltonianMove(mySnake, allSnakes);
-            if (hamiltonianMove != -1) {
-                Point hamiltonianHead = calculateNewHead(mySnake, hamiltonianMove);
-                if (hamiltonianHead != null && isMoveSafe(mySnake, hamiltonianHead, allSnakes)) {
-                    int hamiltonianSpace = calculateReachableSpaceOptimized(hamiltonianHead);
-                    if (hamiltonianSpace >= mySnake.body.size() * 0.5) {
-                        return hamiltonianMove;
-                    }
-                }
-            }
-        }
-
-        // ==================================================================
-        // PHASE 6: RELATIVE MOVES (last attempt before desperation)
-        // ==================================================================
-        if (bestMove == -1 && mySnake.body.size() > 1) {
-            for (int move = 4; move < 7; move++) {
-                Point newHead = calculateNewHead(mySnake, move);
-
-                if (newHead != null && isMoveSafe(mySnake, newHead, allSnakes)) {
-                    int space = calculateReachableSpaceOptimized(newHead);
-                    if (space >= 2) {
-                        return move;
-                    }
-                }
-            }
-        }
-
-        // ==================================================================
-        // PHASE 7: DESPERATION MODE (any safe move)
-        // ==================================================================
-        if (bestMove == -1) {
-            for (int move = 0; move < 4; move++) {
-                Point newHead = calculateNewHead(mySnake, move);
-                if (newHead != null && isBasicallySafe(newHead)) {
-                    if (calculateReachableSpaceOptimized(newHead) >= 1) {
-                        return move;
-                    }
-                }
-            }
-            return 0; // Ultimate fallback
-        }
-
-        return bestMove;
+        spaceCache.put(start, count);
+        return count;
     }
 
-    /**
-     * CRITICAL: Direct pathfinding to apple when close
-     */
-    private int findDirectPathToApple(Point head, int appleX, int appleY, Snake mySnake, Snake[] allSnakes) {
-        int bestMove = -1;
-        int minDist = Integer.MAX_VALUE;
-
-        for (int move = 0; move < 4; move++) {
-            Point newHead = calculateNewHead(mySnake, move);
-
-            if (newHead != null && isMoveSafe(mySnake, newHead, allSnakes)) {
-                int dist = Math.abs(newHead.x - appleX) + Math.abs(newHead.y - appleY);
-
-                if (dist < minDist) {
-                    minDist = dist;
-                    bestMove = move;
-                }
-            }
-        }
-
-        return bestMove;
-    }
-
-    /**
-     * CRITICAL: Check if we'll lose head-on collision at apple
-     */
-    private boolean willLoseHeadOnAtApple(Point myNewPos, int appleX, int appleY,
-            Snake mySnake, Snake[] allSnakes) {
-        // If we're not at the apple, no collision
-        if (myNewPos.x != appleX || myNewPos.y != appleY) {
-            return false;
-        }
-
-        // Check if any enemy can also reach apple this turn
-        for (Snake enemy : allSnakes) {
-            if (enemy == null || !enemy.alive || enemy == mySnake || enemy.body.isEmpty()) {
-                continue;
-            }
-
-            Point enemyHead = enemy.body.get(0);
-
-            // Check if enemy is 1 move away from apple
-            for (int move = 0; move < 4; move++) {
-                int nx = enemyHead.x + dx[move];
-                int ny = enemyHead.y + dy[move];
-
-                if (nx == appleX && ny == appleY) {
-                    // Enemy can reach apple - check who wins
-                    if (enemy.body.size() > mySnake.body.size()) {
-                        return true; // We lose
-                    }
-                    if (enemy.body.size() == mySnake.body.size() && enemy.kills > mySnake.kills) {
-                        return true; // We lose on tiebreaker
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Check if path is blocked by longer snakes
-     */
-    private boolean isPathBlockedByLongerSnake(List<Point> path, Snake mySnake,
-            Snake[] allSnakes, int checkDepth) {
-        if (path == null || path.size() <= 1) {
-            return false;
-        }
-
-        int depth = Math.min(checkDepth, path.size());
-
-        for (int i = 1; i < depth; i++) {
-            Point pathPoint = path.get(i);
-
-            for (Snake enemy : allSnakes) {
-                if (enemy == null || !enemy.alive || enemy == mySnake || enemy.body.isEmpty()) {
-                    continue;
-                }
-
-                if (enemy.body.size() > mySnake.body.size()) {
-                    Point enemyHead = enemy.body.get(0);
-                    int enemyDist = Math.abs(enemyHead.x - pathPoint.x) + Math.abs(enemyHead.y - pathPoint.y);
-
-                    // If enemy can reach this point before or same time as us
-                    if (enemyDist <= i) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Find best hunting opportunity
-     */
-    private Snake findBestHuntingOpportunity(Point myPos, Snake mySnake,
-            Snake[] allSnakes, int appleX, int appleY) {
-        Snake bestTarget = null;
-        int bestScore = Integer.MIN_VALUE;
-
-        for (Snake enemy : allSnakes) {
-            if (enemy == null || !enemy.alive || enemy == mySnake || enemy.body.isEmpty()) {
-                continue;
-            }
-
-            // Only hunt snakes that are shorter
-            if (mySnake.body.size() > enemy.body.size()) {
-                Point enemyHead = enemy.body.get(0);
-                int distance = Math.abs(myPos.x - enemyHead.x) + Math.abs(myPos.y - enemyHead.y);
-
-                // Only consider nearby targets
-                if (distance <= 6) {
-                    int score = 0;
-
-                    // Size advantage bonus
-                    score += (mySnake.body.size() - enemy.body.size()) * 150;
-
-                    // Kill count advantage
-                    int killDiff = mySnake.kills - enemy.kills;
-                    if (killDiff >= 0) {
-                        score += 300 + (killDiff * 100);
-                    }
-
-                    // Proximity bonus (but not too aggressive)
-                    if (distance <= 2) {
-                        score += 200;
-                    } else if (distance <= 4) {
-                        score += 100;
-                    } else {
-                        score -= distance * 10;
-                    }
-
-                    // Bonus if enemy is near apple (intercept opportunity)
-                    int enemyAppleDist = Math.abs(enemyHead.x - appleX) + Math.abs(enemyHead.y - appleY);
-                    if (enemyAppleDist <= 3) {
-                        score += 250;
-                    }
-
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestTarget = enemy;
-                    }
-                }
-            }
-        }
-
-        // Only return target if score is high enough
-        return bestScore > 400 ? bestTarget : null;
-    }
-
-    /**
-     * Find move to intercept/hunt target
-     */
-    private int findHuntingMove(Point myPos, Snake target, Snake mySnake, Snake[] allSnakes) {
-        if (target == null || target.body.isEmpty()) {
-            return -1;
-        }
-
-        Point targetHead = target.body.get(0);
-        int bestMove = -1;
-        int minDist = Integer.MAX_VALUE;
-
-        for (int move = 0; move < 4; move++) {
-            Point newPos = calculateNewHead(mySnake, move);
-
-            if (newPos != null && isMoveSafe(mySnake, newPos, allSnakes)) {
-                int dist = Math.abs(newPos.x - targetHead.x) + Math.abs(newPos.y - targetHead.y);
-
-                if (dist < minDist) {
-                    minDist = dist;
-                    bestMove = move;
-                }
-            }
-        }
-
-        return bestMove;
-    }
-
-    /**
-     * Check if snake is in absolute danger
-     */
-    private boolean isInAbsoluteDanger(Snake mySnake, Snake[] allSnakes) {
-        Point head = mySnake.body.get(0);
-
-        // Check immediate space
-        int safeSquares = 0;
-        for (int i = 0; i < 4; i++) {
-            Point newPos = new Point(head.x + dx[i], head.y + dy[i]);
-            if (newPos.x >= 0 && newPos.x < boardWidth && newPos.y >= 0 && newPos.y < boardHeight) {
-                if (gameBoard[newPos.x][newPos.y] == 0) {
-                    safeSquares++;
-                }
-            }
-        }
-
-        if (safeSquares <= 1) {
+    private boolean isInImmediateDanger(Snake me, Snake[] all, int myIdx) {
+        Point head = me.body.get(0);
+        int space = countSpace(head, me, all, myIdx);
+        if (space < me.body.size() + 3)
             return true;
-        }
 
-        // Check proximity to longer/equal snakes
-        for (Snake enemy : allSnakes) {
-            if (enemy == null || !enemy.alive || enemy == mySnake || enemy.body.isEmpty()) {
-                continue;
+        for (int i = 0; i < all.length; i++) {
+            if (i != myIdx && all[i] != null && all[i].alive && !all[i].body.isEmpty()) {
+                if (all[i].body.size() > me.body.size()) {
+                    int dist = manhattan(head, all[i].body.get(0));
+                    if (dist <= 2)
+                        return true;
+                }
             }
+        }
+        return false;
+    }
 
-            if (enemy.body.size() >= mySnake.body.size()) {
-                Point enemyHead = enemy.body.get(0);
-                int dist = Math.abs(head.x - enemyHead.x) + Math.abs(head.y - enemyHead.y);
+    private int enhancedEmergencyEscape(Snake me, Snake[] all, int myIdx) {
+        Point head = me.body.get(0);
+        int currentDir = getCurrentDir(me);
 
-                if (dist <= 1) {
-                    return true; // Imminent collision with equal/longer snake
+        boolean nearStronger = false;
+        for (int i = 0; i < all.length; i++) {
+            if (i != myIdx && all[i] != null && all[i].alive && !all[i].body.isEmpty()) {
+                if (all[i].body.size() > me.body.size() && manhattan(head, all[i].body.get(0)) <= 3) {
+                    nearStronger = true;
+                    break;
                 }
             }
         }
 
-        return false;
-    }
+        int[] turnOrder;
+        if (nearStronger) {
+            turnOrder = new int[] { (currentDir + 1) % 4, (currentDir + 3) % 4, currentDir, (currentDir + 2) % 4 };
+        } else {
+            turnOrder = new int[] { currentDir, (currentDir + 1) % 4, (currentDir + 3) % 4, (currentDir + 2) % 4 };
+        }
 
-    /**
-     * Find absolute emergency escape
-     */
-    private int findAbsoluteEmergencyEscape(Snake mySnake, Snake[] allSnakes) {
-        Point head = mySnake.body.get(0);
         int bestMove = -1;
         int maxSpace = -1;
 
-        for (int move = 0; move < 4; move++) {
-            Point newPos = calculateNewHead(mySnake, move);
-
-            if (newPos != null && isMoveSafe(mySnake, newPos, allSnakes)) {
-                int space = calculateReachableSpaceOptimized(newPos);
-
-                // Also consider distance from longer snakes
-                int minDistToLonger = Integer.MAX_VALUE;
-                for (Snake enemy : allSnakes) {
-                    if (enemy != null && enemy.alive && enemy != mySnake && !enemy.body.isEmpty()) {
-                        if (enemy.body.size() >= mySnake.body.size()) {
-                            Point enemyHead = enemy.body.get(0);
-                            int dist = Math.abs(newPos.x - enemyHead.x) + Math.abs(newPos.y - enemyHead.y);
-                            minDistToLonger = Math.min(minDistToLonger, dist);
-                        }
-                    }
-                }
-
-                int combinedScore = space * 10 + minDistToLonger * 5;
-
-                if (combinedScore > maxSpace) {
-                    maxSpace = combinedScore;
-                    bestMove = move;
+        for (int dir : turnOrder) {
+            Point newPos = moveHead(me, dir);
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                int space = countSpace(newPos, me, all, myIdx);
+                if (space > maxSpace) {
+                    maxSpace = space;
+                    bestMove = dir;
                 }
             }
         }
 
+        if (bestMove == -1) {
+            for (int dir = 0; dir < 4; dir++) {
+                Point newPos = moveHead(me, dir);
+                if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                    return dir;
+                }
+            }
+        }
+
+        return bestMove != -1 ? bestMove : currentDir;
+    }
+
+    private boolean isPathSurvivable(List<Point> path, Snake me, Snake[] all, int myIdx) {
+        if (path == null || path.size() <= 1)
+            return false;
+
+        Snake virtualMe = copySnake(me);
+        int maxSteps = Math.min(path.size() - 1, 6);
+
+        for (int step = 1; step <= maxSteps; step++) {
+            Point nextPos = path.get(step);
+
+            virtualMe.body.add(0, nextPos);
+            if (virtualMe.body.size() > me.body.size()) {
+                virtualMe.body.remove(virtualMe.body.size() - 1);
+            }
+
+            if (!isMoveValid(virtualMe, nextPos, all, myIdx))
+                return false;
+
+            int futureSpace = countSpace(nextPos, virtualMe, all, myIdx);
+            if (futureSpace < virtualMe.body.size() / 2)
+                return false;
+        }
+        return true;
+    }
+
+    private List<Point> findPathBFS(Point start, Point goal, Snake me, Snake[] all, int myIdx) {
+        if (start == null || goal == null)
+            return null;
+
+        for (int i = 0; i < boardWidth; i++) {
+            Arrays.fill(visited[i], false);
+        }
+
+        for (Snake s : all) {
+            if (s != null && s.alive && s.body != null) {
+                for (int i = 0; i < s.body.size() - 1; i++) {
+                    Point p = s.body.get(i);
+                    if (inBounds(p))
+                        visited[p.x][p.y] = true;
+                }
+            }
+        }
+
+        Queue<Point> q = new LinkedList<>();
+        Map<Point, Point> parent = new HashMap<>();
+
+        q.offer(start);
+        visited[start.x][start.y] = false;
+        parent.put(start, null);
+
+        while (!q.isEmpty()) {
+            Point cur = q.poll();
+
+            if (cur.equals(goal)) {
+                return reconstruct(parent, start, goal);
+            }
+
+            for (int i = 0; i < 4; i++) {
+                int nx = cur.x + dx[i];
+                int ny = cur.y + dy[i];
+
+                if (inBounds(new Point(nx, ny)) && !visited[nx][ny]) {
+                    Point next = new Point(nx, ny);
+                    visited[nx][ny] = true;
+                    parent.put(next, cur);
+                    q.offer(next);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private int findHamiltonMove(Snake me, Point apple, Snake[] all, int myIdx) {
+        Point head = me.body.get(0);
+        int searchRadius = 10;
+        int minScore = Integer.MAX_VALUE;
+        Point bestCyclePoint = null;
+
+        for (Point cyclePoint : hamiltonCycle) {
+            int distFromHead = manhattan(head, cyclePoint);
+            if (distFromHead > searchRadius)
+                continue;
+
+            if (isPositionSafe(cyclePoint, me, all)) {
+                int distToApple = manhattan(cyclePoint, apple);
+                int score = distToApple + distFromHead;
+
+                if (score < minScore) {
+                    minScore = score;
+                    bestCyclePoint = cyclePoint;
+                }
+            }
+        }
+
+        if (bestCyclePoint != null) {
+            return getGreedyMove(head, bestCyclePoint, me, all, myIdx);
+        }
+        return -1;
+    }
+
+    private List<Point> findPathAStar(Point start, Point goal, Snake me, Snake[] all, int myIdx) {
+        if (start == null || goal == null)
+            return null;
+
+        for (int i = 0; i < boardWidth; i++) {
+            Arrays.fill(visited[i], false);
+        }
+
+        for (Snake s : all) {
+            if (s != null && s.alive && s.body != null) {
+                for (int i = 0; i < s.body.size() - 1; i++) {
+                    Point p = s.body.get(i);
+                    if (inBounds(p))
+                        visited[p.x][p.y] = true;
+                }
+            }
+        }
+
+        PriorityQueue<PathNode> pq = new PriorityQueue<>((a, b) -> Integer.compare(a.f, b.f));
+        Map<Point, Point> parent = new HashMap<>();
+        Map<Point, Integer> gScore = new HashMap<>();
+        boolean[][] closed = new boolean[boardWidth][boardHeight];
+
+        int h = manhattan(start, goal);
+        PathNode startNode = new PathNode(start, 0, h);
+
+        pq.offer(startNode);
+        parent.put(start, null);
+        gScore.put(start, 0);
+
+        while (!pq.isEmpty()) {
+            PathNode curNode = pq.poll();
+            Point cur = curNode.p;
+
+            if (closed[cur.x][cur.y])
+                continue;
+            closed[cur.x][cur.y] = true;
+
+            if (cur.equals(goal)) {
+                return reconstruct(parent, start, goal);
+            }
+
+            for (int i = 0; i < 4; i++) {
+                int nx = cur.x + dx[i];
+                int ny = cur.y + dy[i];
+                Point next = new Point(nx, ny);
+
+                if (inBounds(next) && !visited[nx][ny] && !closed[nx][ny]) {
+                    int spaceAtNext = countSpace(next, me, all, myIdx);
+                    int spaceBonus = Math.max(0, (spaceAtNext - me.body.size()) / 4);
+
+                    int enemyPenalty = 0;
+                    for (int j = 0; j < all.length; j++) {
+                        if (j != myIdx && all[j] != null && all[j].alive && !all[j].body.isEmpty()) {
+                            int distToEnemy = manhattan(next, all[j].body.get(0));
+                            if (distToEnemy <= 2) {
+                                enemyPenalty += 3;
+                                if (distToEnemy == 1 && all[j].body.size() >= me.body.size()) {
+                                    enemyPenalty += 8;
+                                }
+                            }
+                        }
+                    }
+
+                    int tentativeG = curNode.g + 1 + enemyPenalty - spaceBonus;
+
+                    if (tentativeG < gScore.getOrDefault(next, Integer.MAX_VALUE)) {
+                        gScore.put(next, tentativeG);
+                        int heuristic = manhattan(next, goal);
+                        PathNode nextNode = new PathNode(next, tentativeG, heuristic);
+                        pq.offer(nextNode);
+                        parent.put(next, cur);
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private int getTrueSpiralMove(Snake me, Point target, Snake[] all, int myIdx) {
+        Point head = me.body.get(0);
+        int currentDir = getCurrentDir(me);
+        int targetDir = getDirectionToward(head, target);
+        if (targetDir == -1)
+            targetDir = currentDir;
+
+        int[] spiralPriority = {
+                targetDir,
+                (currentDir + 1) % 4,
+                currentDir,
+                (currentDir + 3) % 4
+        };
+
+        for (int dir : spiralPriority) {
+            Point newPos = moveHead(me, dir);
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                if (isExpandingMovement(me, newPos)) {
+                    return dir;
+                }
+            }
+        }
+
+        for (int dir = 0; dir < 4; dir++) {
+            Point newPos = moveHead(me, dir);
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                return dir;
+            }
+        }
+        return -1;
+    }
+
+    private boolean isExpandingMovement(Snake me, Point newPos) {
+        int futureOptions = 0;
+        for (int dir = 0; dir < 4; dir++) {
+            Point futurePos = new Point(newPos.x + dx[dir], newPos.y + dy[dir]);
+            if (inBounds(futurePos)) {
+                boolean blocked = false;
+                for (Point bodyPart : me.body) {
+                    if (bodyPart.equals(futurePos)) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (!blocked)
+                    futureOptions++;
+            }
+        }
+        return futureOptions >= 2;
+    }
+
+    private int getDirectionToward(Point from, Point to) {
+        int dx = to.x - from.x;
+        int dy = to.y - from.y;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            return dx > 0 ? 3 : 2;
+        } else {
+            return dy > 0 ? 1 : 0;
+        }
+    }
+
+    private Snake findEasyTarget(Snake me, Snake[] all, int myIdx) {
+        Snake target = null;
+        int minSize = Integer.MAX_VALUE;
+
+        for (int i = 0; i < all.length; i++) {
+            if (i == myIdx || all[i] == null || !all[i].alive)
+                continue;
+
+            if (me.body.size() > all[i].body.size() + 2) {
+                Point enemyHead = all[i].body.get(0);
+                int dist = manhattan(me.body.get(0), enemyHead);
+
+                if (dist <= 5 && all[i].body.size() < minSize) {
+                    minSize = all[i].body.size();
+                    target = all[i];
+                }
+            }
+        }
+        return target;
+    }
+
+    private int simpleHunt(Snake me, Snake target, Snake[] all, int myIdx) {
+        if (me.body.size() <= target.body.size() + 2)
+            return -1;
+
+        Point myHead = me.body.get(0);
+        Point targetHead = target.body.get(0);
+
+        int targetIdx = -1;
+        for (int i = 0; i < all.length; i++) {
+            if (all[i] == target) {
+                targetIdx = i;
+                break;
+            }
+        }
+
+        // ENHANCED: 3-step prediction instead of 1-step (we have 50ms!)
+        Point predicted = predictPositionMultiStep(target, targetIdx, 3);
+        Point center = new Point(boardWidth / 2, boardHeight / 2);
+
+        int bestMove = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (int dir = 0; dir < 4; dir++) {
+            Point newPos = moveHead(me, dir);
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                int score = 0;
+
+                int distToTarget = manhattan(newPos, predicted);
+                score += (10 - distToTarget) * 100;
+
+                if (isBetween(newPos, targetHead, center)) {
+                    score += 500;
+                }
+
+                // ENHANCED: Multi-step trap simulation (using 50ms budget)
+                if (canTrapMultiStep(newPos, target, all, myIdx, 3)) {
+                    score += 1500; // Increased bonus for confirmed 3-step trap
+                }
+
+                // NEW: Evaluate if we're cutting off escape routes
+                int blockedEscapes = countBlockedEscapeRoutes(newPos, target, all);
+                score += blockedEscapes * 300;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = dir;
+                }
+            }
+        }
         return bestMove;
     }
 
-    /**
-     * COMPREHENSIVE MOVE EVALUATION
-     */
-    private int evaluateMove(Point newPos, Snake mySnake, Snake[] allSnakes,
-            int appleX, int appleY, int appleValue) {
+    // Single-step position prediction with randomness
+    private Point predictPositionEnhanced(Snake target, int targetIdx) {
+        if (target.body.size() < 2)
+            return target.body.get(0);
+
+        Point head = target.body.get(0);
+        Point neck = target.body.get(1);
+        int dx = head.x - neck.x;
+        int dy = head.y - neck.y;
+
+        SnakeProfile profile = profiles.get(targetIdx);
+        if (profile != null && profile.kills > 1 && random.nextDouble() > 0.5) {
+            int randTurn = random.nextInt(2) == 0 ? 1 : -1;
+            int temp = dx;
+            dx = dy * randTurn;
+            dy = -temp * randTurn;
+        }
+
+        Point predicted = new Point(head.x + dx, head.y + dy);
+        return inBounds(predicted) ? predicted : head;
+    }
+
+    private boolean canTrapAtPosition(Point myPos, Snake target, Snake[] all, int myIdx) {
+        Point targetHead = target.body.get(0);
+        int escapeRoutes = 0;
+
+        for (int dir = 0; dir < 4; dir++) {
+            Point escape = new Point(targetHead.x + dx[dir], targetHead.y + dy[dir]);
+            if (escape.equals(myPos))
+                continue;
+            if (inBounds(escape) && isPositionSafe(escape, target, all)) {
+                escapeRoutes++;
+            }
+        }
+        return escapeRoutes <= 1;
+    }
+
+    // NEW: Enhanced multi-step trap detection (uses 50ms budget wisely)
+    private boolean canTrapMultiStep(Point myStartPos, Snake target, Snake[] all, int myIdx, int steps) {
+        Snake virtualTarget = cloneSnake(target);
+        Point virtualMyPos = myStartPos;
+
+        int targetIdx = -1;
+        for (int i = 0; i < all.length; i++) {
+            if (all[i] == target) {
+                targetIdx = i;
+                break;
+            }
+        }
+
+        for (int step = 0; step < steps; step++) {
+            // Predict where target will move
+            Point predicted = predictPositionEnhanced(virtualTarget, targetIdx);
+
+            // Simulate target moving there
+            virtualTarget.body.add(0, predicted);
+            if (virtualTarget.body.size() > target.body.size()) {
+                virtualTarget.body.remove(virtualTarget.body.size() - 1);
+            }
+
+            // Check if target is trapped at this step
+            int escapes = 0;
+            for (int dir = 0; dir < 4; dir++) {
+                Point escape = new Point(predicted.x + dx[dir], predicted.y + dy[dir]);
+                if (escape.equals(virtualMyPos))
+                    continue;
+                if (inBounds(escape) && isPositionSafe(escape, virtualTarget, all)) {
+                    escapes++;
+                }
+            }
+
+            if (escapes == 0) {
+                return true; // Trapped at this step!
+            }
+
+            // We also advance one step closer
+            int closestDir = -1;
+            int minDist = Integer.MAX_VALUE;
+            for (int dir = 0; dir < 4; dir++) {
+                Point nextMyPos = new Point(virtualMyPos.x + dx[dir], virtualMyPos.y + dy[dir]);
+                if (inBounds(nextMyPos)) {
+                    int dist = manhattan(nextMyPos, predicted);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestDir = dir;
+                    }
+                }
+            }
+            if (closestDir != -1) {
+                virtualMyPos = new Point(virtualMyPos.x + dx[closestDir], virtualMyPos.y + dy[closestDir]);
+            }
+        }
+
+        return false;
+    }
+
+    // NEW: Count how many escape routes we're blocking
+    private int countBlockedEscapeRoutes(Point myPos, Snake target, Snake[] all) {
+        Point targetHead = target.body.get(0);
+        int blocked = 0;
+
+        for (int dir = 0; dir < 4; dir++) {
+            Point escape = new Point(targetHead.x + dx[dir], targetHead.y + dy[dir]);
+
+            // Check if this escape route leads through or near our position
+            if (manhattan(escape, myPos) <= 1) {
+                if (!isPositionSafe(escape, target, all)) {
+                    blocked++;
+                }
+            }
+        }
+
+        return blocked;
+    }
+
+    // NEW: Iterative multi-step prediction
+    private Point predictPositionMultiStep(Snake target, int targetIdx, int steps) {
+        Snake virtualTarget = cloneSnake(target);
+        Point predicted = target.body.get(0);
+
+        for (int step = 0; step < steps; step++) {
+            predicted = predictPositionEnhanced(virtualTarget, targetIdx);
+
+            // Update virtual snake position
+            virtualTarget.body.add(0, predicted);
+            if (virtualTarget.body.size() > target.body.size()) {
+                virtualTarget.body.remove(virtualTarget.body.size() - 1);
+            }
+        }
+
+        return predicted;
+    }
+
+    // Helper: Clone snake for simulation
+    private Snake cloneSnake(Snake s) {
+        Snake clone = new Snake();
+        clone.alive = s.alive;
+        clone.length = s.length;
+        clone.kills = s.kills;
+        clone.body = new ArrayList<>(s.body);
+        return clone;
+    }
+
+    private boolean isBetween(Point a, Point b, Point c) {
+        int distBC = manhattan(b, c);
+        int distBA = manhattan(b, a);
+        int distAC = manhattan(a, c);
+        return (distBA + distAC) <= (distBC + 2);
+    }
+
+    private boolean isPositionSafe(Point pos, Snake snake, Snake[] all) {
+        if (!inBounds(pos))
+            return false;
+        for (Snake s : all) {
+            if (s != null && s.alive && s.body != null) {
+                for (int i = 0; i < s.body.size() - 1; i++) {
+                    if (pos.equals(s.body.get(i)))
+                        return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private int getGreedyMove(Point head, Point target, Snake me, Snake[] all, int myIdx) {
+        int bestMove = -1;
+        int minDist = Integer.MAX_VALUE;
+
+        for (int m = 0; m < 4; m++) {
+            Point newPos = moveHead(me, m);
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                int d = manhattan(newPos, target);
+                if (d < minDist) {
+                    minDist = d;
+                    bestMove = m;
+                }
+            }
+        }
+        return bestMove;
+    }
+
+    private Snake copySnake(Snake original) {
+        Snake copy = new Snake();
+        copy.alive = original.alive;
+        copy.length = original.length;
+        copy.kills = original.kills;
+        copy.body = new ArrayList<>(original.body);
+        return copy;
+    }
+
+    private boolean willLoseAtApple(Snake me, Point apple, Snake[] all, int myIdx) {
+        Point myHead = me.body.get(0);
+        int myDist = manhattan(myHead, apple);
+
+        for (int i = 0; i < all.length; i++) {
+            if (i == myIdx || all[i] == null || !all[i].alive || all[i].body.isEmpty())
+                continue;
+
+            int enemyDist = manhattan(all[i].body.get(0), apple);
+
+            if (enemyDist <= myDist) {
+                if (all[i].body.size() >= me.body.size()) {
+                    return true;
+                }
+                if (all[i].body.size() == me.body.size() && all[i].kills >= me.kills) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean isMoveValid(Snake me, Point pos, Snake[] all, int myIdx) {
+        if (!inBounds(pos))
+            return false;
+
+        if (me.body.size() >= 2 && pos.equals(me.body.get(1)))
+            return false;
+
+        for (int i = 0; i < me.body.size() - 1; i++) {
+            if (pos.equals(me.body.get(i)))
+                return false;
+        }
+
+        for (Snake s : all) {
+            if (s != null && s != me && s.alive && s.body != null) {
+                for (int i = 0; i < s.body.size() - 1; i++) {
+                    if (pos.equals(s.body.get(i)))
+                        return false;
+                }
+            }
+        }
+
+        for (int i = 0; i < all.length; i++) {
+            if (i == myIdx || all[i] == null || !all[i].alive || all[i].body.isEmpty())
+                continue;
+
+            Point enemyHead = all[i].body.get(0);
+
+            for (int d = 0; d < 4; d++) {
+                int nx = enemyHead.x + dx[d];
+                int ny = enemyHead.y + dy[d];
+
+                if (nx == pos.x && ny == pos.y) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private List<Point> reconstruct(Map<Point, Point> parent, Point start, Point goal) {
+        List<Point> path = new ArrayList<>();
+        Point cur = goal;
+
+        while (cur != null && !cur.equals(start)) {
+            path.add(0, cur);
+            cur = parent.get(cur);
+        }
+
+        if (cur != null) {
+            path.add(0, start);
+            return path;
+        }
+        return null;
+    }
+
+    private int findBestSafeMove(Snake me, Snake[] all, int myIdx, Point apple, int appleVal) {
+        int bestMove = -1;
+        int bestScore = Integer.MIN_VALUE;
+
+        for (int m = 0; m < 4; m++) {
+            Point newPos = moveHead(me, m);
+
+            if (newPos == null || !isMoveValid(me, newPos, all, myIdx))
+                continue;
+
+            int score = scorePosition(newPos, me, all, myIdx, apple, appleVal);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove = m;
+            }
+        }
+
+        if (bestMove == -1) {
+            int currentDir = getCurrentDir(me);
+            Point continuePos = moveHead(me, currentDir);
+            if (continuePos != null && isMoveValid(me, continuePos, all, myIdx)) {
+                return currentDir;
+            }
+
+            for (int m = 0; m < 4; m++) {
+                Point newPos = moveHead(me, m);
+                if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                    return m;
+                }
+            }
+        }
+        return bestMove != -1 ? bestMove : 0;
+    }
+
+    private int getCurrentDir(Snake me) {
+        if (me.body.size() < 2)
+            return 0;
+        Point head = me.body.get(0);
+        Point neck = me.body.get(1);
+        return getDir(neck, head);
+    }
+
+    private int scorePosition(Point pos, Snake me, Snake[] all, int myIdx, Point apple, int appleVal) {
         int score = 0;
 
-        // Space evaluation (critical for survival)
-        int reachableSpace = calculateReachableSpaceOptimized(newPos);
-        score += reachableSpace * 12; // Increased weight
+        // ENHANCED: More sophisticated space evaluation (using 50ms budget)
+        int space = countSpace(pos, me, all, myIdx);
+        int territoryControl = evaluateTerritoryControl(pos, me, all, myIdx);
+        score += space * 15;
+        score += territoryControl * 25; // NEW: Reward controlling key board areas
 
-        // Penalty for tight spaces
-        if (reachableSpace < mySnake.body.size() * 0.5) {
-            score -= 2000;
-        }
-        if (reachableSpace < 3) {
-            score -= 8000;
-        }
+        if (space < me.body.size() / 4)
+            score -= 5000;
+        if (space < 2)
+            return Integer.MIN_VALUE;
 
-        // Apple distance (aggressive pursuit)
-        int appleDist = Math.abs(newPos.x - appleX) + Math.abs(newPos.y - appleY);
+        // NEW: Future space projection (2-step look-ahead)
+        int futureSpace = projectFutureSpace(pos, me, all, myIdx, 2);
+        score += futureSpace * 10;
 
-        if (appleValue >= 1) {
-            // AGGRESSIVE: Strong pull toward apple
-            score += (50 - appleDist) * 40; // Increased multiplier
+        if (appleVal >= 1) {
+            int dist = manhattan(pos, apple);
+            score += (boardWidth - dist) * 120;
 
-            if (appleDist == 0) {
-                score += 5000; // MASSIVE bonus for eating apple
-            } else if (appleDist == 1) {
-                score += 1500; // Huge bonus for being adjacent
-            } else if (appleDist == 2) {
-                score += 800; // Strong bonus for being close
+            if (dist == 0)
+                score += 15000;
+            else if (dist == 1)
+                score += 5000;
+            else if (dist == 2)
+                score += 2000;
+
+            // NEW: Evaluate if apple is in "our territory"
+            if (isInOurTerritory(apple, pos, me, all, myIdx)) {
+                score += 1000; // Bonus for apples we can safely claim
             }
-        } else if (appleValue < 0 && appleValue > -4) {
-            // Avoid bad apples
-            score -= (10 - appleDist) * 30;
-        } else if (appleValue <= -4) {
-            // FLEE from deadly apples
-            score -= (20 - appleDist) * 150;
-            if (appleDist <= 1) {
-                score -= 5000;
-            }
+        } else if (appleVal < 0) {
+            int dist = manhattan(pos, apple);
+            score += dist * 50;
         }
 
-        // Combat evaluation
-        for (Snake enemy : allSnakes) {
-            if (enemy == null || !enemy.alive || enemy == mySnake || enemy.body.isEmpty()) {
+        int centerX = boardWidth / 2;
+        int centerY = boardHeight / 2;
+        int distCenter = manhattan(pos, new Point(centerX, centerY));
+        score += (boardWidth - distCenter) * 20;
+
+        int edgeDist = Math.min(
+                Math.min(pos.x, boardWidth - 1 - pos.x),
+                Math.min(pos.y, boardHeight - 1 - pos.y));
+        if (edgeDist == 0)
+            score -= 1500;
+        else if (edgeDist == 1)
+            score -= 600;
+        else if (edgeDist == 2)
+            score -= 200;
+
+        // ENHANCED: More sophisticated opponent evaluation
+        boolean nearStronger = false;
+        for (int i = 0; i < all.length; i++) {
+            if (i == myIdx || all[i] == null || !all[i].alive || all[i].body.isEmpty())
                 continue;
+
+            Point enemyHead = all[i].body.get(0);
+            int distEnemy = manhattan(pos, enemyHead);
+
+            SnakeProfile enemyProfile = profiles.get(i);
+            int enemyKills = enemyProfile != null ? enemyProfile.kills : all[i].kills;
+            int enemySize = enemyProfile != null ? enemyProfile.size : all[i].body.size();
+
+            if (enemySize > me.body.size() && distEnemy <= 3) {
+                nearStronger = true;
             }
 
-            Point enemyHead = enemy.body.get(0);
-            int distToEnemy = Math.abs(newPos.x - enemyHead.x) + Math.abs(newPos.y - enemyHead.y);
-
-            int sizeDiff = mySnake.body.size() - enemy.body.size();
-
-            if (sizeDiff > 0) {
-                // We're longer - hunting mode
-                if (distToEnemy <= 3) {
-                    score += 300 + (sizeDiff * 50);
+            if (me.body.size() > enemySize) {
+                int aggression = 300;
+                if (enemyKills < me.kills) {
+                    aggression += 200;
                 }
-                if (distToEnemy == 1) {
-                    score += 400; // Kill opportunity
-                }
-            } else if (sizeDiff < 0) {
-                // Enemy is longer - evasion mode
-                if (distToEnemy <= 2) {
-                    score -= 1500; // Strong avoidance
-                } else if (distToEnemy <= 4) {
-                    score -= 500;
-                } else {
-                    score += distToEnemy * 10; // Bonus for distance
+
+                if (distEnemy <= 2)
+                    score += aggression;
+                if (distEnemy == 1)
+                    score += aggression * 2;
+
+                // NEW: Bonus for cornering weaker opponents
+                if (distEnemy <= 3 && isNearWall(enemyHead)) {
+                    score += 500;
                 }
             } else {
-                // Equal size - use kills as tiebreaker
-                int killDiff = mySnake.kills - enemy.kills;
-                if (killDiff > 0 && distToEnemy <= 2) {
-                    score += 200; // Slight aggression if we have more kills
-                } else if (killDiff < 0 && distToEnemy <= 2) {
-                    score -= 400; // Avoid if they have more kills
+                int threat = 1000;
+                if (enemyKills > me.kills) {
+                    threat += 500;
+                }
+
+                if (distEnemy == 1) {
+                    score -= 8000 + (enemyKills * 100) + (enemySize > me.body.size() ? 2000 : 0);
+                } else if (distEnemy == 2) {
+                    score -= 3000 + (enemyKills * 50) + (enemySize > me.body.size() ? 1000 : 0);
+                } else if (distEnemy <= 3) {
+                    score -= threat * (enemySize - me.body.size());
+                } else if (distEnemy <= 4) {
+                    score -= 800;
+                } else {
+                    score += distEnemy * 10;
                 }
             }
         }
 
-        // Wall proximity (prefer center)
-        int wallDist = Math.min(
-                Math.min(newPos.x, boardWidth - 1 - newPos.x),
-                Math.min(newPos.y, boardHeight - 1 - newPos.y));
-        score += wallDist * 5;
-
-        // Penalty for corners
-        if ((newPos.x == 0 || newPos.x == boardWidth - 1) &&
-                (newPos.y == 0 || newPos.y == boardHeight - 1)) {
-            score -= 500;
+        if (nearStronger) {
+            score -= 2000; // Strong survival incentive
         }
 
         return score;
     }
 
-    // ========================================================================
-    // UTILITY METHODS
-    // ========================================================================
+    private int moveAwayFrom(Point from, Point danger, Snake me, Snake[] all, int myIdx) {
+        int bestMove = -1;
+        int maxDist = -1;
 
-    private Point calculateNewHead(Snake snake, int move) {
-        if (snake == null || snake.body == null || snake.body.isEmpty()) {
-            return null;
-        }
+        for (int m = 0; m < 4; m++) {
+            Point newPos = moveHead(me, m);
 
-        Point head = snake.body.get(0);
-        if (head == null) {
-            return null;
+            if (newPos != null && isMoveValid(me, newPos, all, myIdx)) {
+                int dist = manhattan(newPos, danger);
+                int space = countSpace(newPos, me, all, myIdx);
+
+                if (space >= 3 && dist > maxDist) {
+                    maxDist = dist;
+                    bestMove = m;
+                }
+            }
         }
+        return bestMove != -1 ? bestMove : 0;
+    }
+
+    private Point moveHead(Snake s, int move) {
+        if (s == null || s.body.isEmpty())
+            return null;
+        Point h = s.body.get(0);
 
         switch (move) {
             case 0:
-                return new Point(head.x, head.y - 1); // North
+                return new Point(h.x, h.y - 1);
             case 1:
-                return new Point(head.x, head.y + 1); // South
+                return new Point(h.x, h.y + 1);
             case 2:
-                return new Point(head.x - 1, head.y); // West
+                return new Point(h.x - 1, h.y);
             case 3:
-                return new Point(head.x + 1, head.y); // East
-            case 4: // Relative left
-            case 5: // Relative straight
-            case 6: // Relative right
-                if (snake.body.size() > 1) {
-                    Point neck = snake.body.get(1);
-                    if (neck != null) {
-                        return calculateRelativeMove(head, neck, move);
-                    }
-                }
-                return new Point(head.x, head.y - 1);
+                return new Point(h.x + 1, h.y);
             default:
-                return new Point(head.x, head.y - 1);
+                return null;
         }
     }
 
-    private Point calculateRelativeMove(Point head, Point previous, int move) {
-        if (head == null || previous == null) {
-            return new Point(head.x, head.y - 1);
-        }
-
-        int dx = head.x - previous.x;
-        int dy = head.y - previous.y;
-
-        if (Math.abs(dx) > 1)
-            dx = Integer.signum(dx);
-        if (Math.abs(dy) > 1)
-            dy = Integer.signum(dy);
-
-        switch (move) {
-            case 4:
-                return new Point(head.x - dy, head.y + dx); // Turn left
-            case 5:
-                return new Point(head.x + dx, head.y + dy); // Straight
-            case 6:
-                return new Point(head.x + dy, head.y - dx); // Turn right
-            default:
-                return new Point(head.x + dx, head.y + dy);
-        }
+    private boolean inBounds(Point p) {
+        return p != null && p.x >= 0 && p.x < boardWidth && p.y >= 0 && p.y < boardHeight;
     }
 
-    private boolean isMoveSafe(Snake mySnake, Point newHead, Snake[] allSnakes) {
-        if (newHead == null || mySnake == null || !mySnake.alive) {
-            return false;
-        }
-
-        // Wall check
-        if (newHead.x < 0 || newHead.x >= boardWidth || newHead.y < 0 || newHead.y >= boardHeight) {
-            return false;
-        }
-
-        // Self-collision check (excluding tail)
-        if (mySnake.body != null) {
-            for (int i = 0; i < mySnake.body.size() - 1; i++) {
-                Point bodyPart = mySnake.body.get(i);
-                if (bodyPart != null && newHead.equals(bodyPart)) {
-                    return false;
-                }
-            }
-        }
-
-        // Enemy collision check (excluding tails)
-        if (allSnakes != null) {
-            for (Snake snake : allSnakes) {
-                if (snake != null && snake != mySnake && snake.alive && snake.body != null) {
-                    for (int i = 0; i < snake.body.size() - 1; i++) {
-                        Point bodyPart = snake.body.get(i);
-                        if (bodyPart != null && newHead.equals(bodyPart)) {
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-
-        return true;
+    private int manhattan(Point a, Point b) {
+        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
     }
 
-    private int calculateReachableSpaceOptimized(Point start) {
-        if (start == null || start.x < 0 || start.x >= boardWidth ||
-                start.y < 0 || start.y >= boardHeight) {
-            return 0;
-        }
-
-        if (gameBoard == null) {
-            return 5;
-        }
-
-        boolean[][] localVisited = new boolean[boardWidth][boardHeight];
-        Queue<Point> queue = new LinkedList<>();
-        queue.offer(start);
-        localVisited[start.x][start.y] = true;
-        int count = 0;
-
-        while (!queue.isEmpty() && count < 30) { // Increased limit for better accuracy
-            Point current = queue.poll();
-            if (current == null)
-                continue;
-
-            count++;
-
-            for (int i = 0; i < 4; i++) {
-                int nx = current.x + dx[i];
-                int ny = current.y + dy[i];
-
-                if (nx >= 0 && nx < boardWidth && ny >= 0 && ny < boardHeight &&
-                        !localVisited[nx][ny] && gameBoard[nx][ny] == 0) {
-                    localVisited[nx][ny] = true;
-                    queue.offer(new Point(nx, ny));
-                }
-            }
-        }
-
-        return Math.max(count, 1);
-    }
-
-    private void setupGameBoardEfficiently(Snake[] allSnakes) {
-        // Clear board
-        for (int i = 0; i < boardWidth; i++) {
-            for (int j = 0; j < boardHeight; j++) {
-                gameBoard[i][j] = 0;
-            }
-        }
-
-        // Mark all snake bodies
-        for (Snake snake : allSnakes) {
-            if (snake == null || !snake.alive)
-                continue;
-            for (Point body : snake.body) {
-                if (body.x >= 0 && body.x < boardWidth && body.y >= 0 && body.y < boardHeight) {
-                    gameBoard[body.x][body.y] = 1;
-                }
-            }
-        }
-    }
-
-    private boolean isBasicallySafe(Point pos) {
-        return pos.x >= 0 && pos.x < boardWidth && pos.y >= 0 && pos.y < boardHeight;
-    }
-
-    // ========================================================================
-    // BFS PATHFINDING
-    // ========================================================================
-
-    private List<Point> findBFSPath(Point start, Point target, Snake[] allSnakes) {
-        if (start == null || target == null)
-            return null;
-
-        // Initialize BFS structures
-        for (int i = 0; i < boardWidth; i++) {
-            for (int j = 0; j < boardHeight; j++) {
-                bfsDistance[i][j] = -1;
-                bfsParent[i][j] = null;
-                visited[i][j] = false;
-            }
-        }
-
-        // Mark obstacles (snake bodies excluding tails)
-        for (Snake snake : allSnakes) {
-            if (snake != null && snake.alive && snake.body != null) {
-                // Don't mark tail as it will move
-                for (int i = 0; i < snake.body.size() - 1; i++) {
-                    Point body = snake.body.get(i);
-                    if (body != null && isValidBounds(body)) {
-                        visited[body.x][body.y] = true;
-                    }
-                }
-            }
-        }
-
-        // BFS initialization
-        bfsQueue.clear();
-        bfsQueue.offer(start);
-        bfsDistance[start.x][start.y] = 0;
-        visited[start.x][start.y] = false; // Start should be accessible
-
-        // BFS search
-        while (!bfsQueue.isEmpty()) {
-            Point current = bfsQueue.poll();
-
-            if (current.equals(target)) {
-                return reconstructBFSPath(start, target);
-            }
-
-            for (int i = 0; i < 4; i++) {
-                int nx = current.x + dx[i];
-                int ny = current.y + dy[i];
-                Point next = new Point(nx, ny);
-
-                if (isValidBounds(next) && !visited[nx][ny]) {
-                    visited[nx][ny] = true;
-                    bfsDistance[nx][ny] = bfsDistance[current.x][current.y] + 1;
-                    bfsParent[nx][ny] = current;
-                    bfsQueue.offer(next);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private List<Point> reconstructBFSPath(Point start, Point target) {
-        List<Point> path = new ArrayList<>();
-        Point current = target;
-
-        while (current != null && !current.equals(start)) {
-            path.add(0, current);
-            current = bfsParent[current.x][current.y];
-        }
-
-        if (current != null) {
-            path.add(0, start);
-            return path;
-        }
-
-        return null;
-    }
-
-    private boolean isValidBounds(Point p) {
-        return p.x >= 0 && p.x < boardWidth && p.y >= 0 && p.y < boardHeight;
-    }
-
-    private int getDirectionToPoint(Point from, Point to) {
+    private int getDir(Point from, Point to) {
         if (from == null || to == null)
             return -1;
 
@@ -876,214 +1100,169 @@ public class MyAgent extends DevelopmentAgent {
         int dy = to.y - from.y;
 
         if (dx == 0 && dy == -1)
-            return 0; // North
+            return 0;
         if (dx == 0 && dy == 1)
-            return 1; // South
+            return 1;
         if (dx == -1 && dy == 0)
-            return 2; // West
+            return 2;
         if (dx == 1 && dy == 0)
-            return 3; // East
+            return 3;
 
         return -1;
     }
 
-    // ========================================================================
-    // HAMILTONIAN CYCLE (Emergency Fallback)
-    // ========================================================================
+    private Snake parseSnake(String line) {
+        if (line == null || line.isEmpty())
+            return null;
 
-    private List<Point> generateHamiltonianCycle() {
-        List<Point> cycle = new ArrayList<>();
-
-        if (boardWidth % 2 == 0 && boardHeight % 2 == 0) {
-            // Simple snake pattern for even dimensions
-            for (int y = 0; y < boardHeight; y++) {
-                if (y % 2 == 0) {
-                    for (int x = 0; x < boardWidth; x++) {
-                        cycle.add(new Point(x, y));
-                    }
-                } else {
-                    for (int x = boardWidth - 1; x >= 0; x--) {
-                        cycle.add(new Point(x, y));
-                    }
-                }
-            }
-        } else {
-            return generateModifiedHamiltonianCycle();
-        }
-
-        return cycle.size() == boardWidth * boardHeight ? cycle : null;
-    }
-
-    private List<Point> generateModifiedHamiltonianCycle() {
-        List<Point> cycle = new ArrayList<>();
-
-        int left = 0, right = boardWidth - 1;
-        int top = 0, bottom = boardHeight - 1;
-
-        while (left <= right && top <= bottom) {
-            // Top row
-            for (int x = left; x <= right; x++) {
-                cycle.add(new Point(x, top));
-            }
-            top++;
-
-            // Right column
-            for (int y = top; y <= bottom; y++) {
-                cycle.add(new Point(right, y));
-            }
-            right--;
-
-            // Bottom row
-            if (top <= bottom) {
-                for (int x = right; x >= left; x--) {
-                    cycle.add(new Point(x, bottom));
-                }
-                bottom--;
-            }
-
-            // Left column
-            if (left <= right) {
-                for (int y = bottom; y >= top; y--) {
-                    cycle.add(new Point(left, y));
-                }
-                left++;
-            }
-        }
-
-        return cycle;
-    }
-
-    private int getHamiltonianMove(Snake mySnake, Snake[] allSnakes) {
-        if (hamiltonianCycle == null || hamiltonianCycle.isEmpty())
-            return -1;
-
-        Point head = mySnake.body.get(0);
-
-        // Find current position in cycle
-        int currentIndex = -1;
-        for (int i = 0; i < hamiltonianCycle.size(); i++) {
-            if (hamiltonianCycle.get(i).equals(head)) {
-                currentIndex = i;
-                break;
-            }
-        }
-
-        if (currentIndex == -1) {
-            currentIndex = findClosestHamiltonianPoint(head);
-        }
-
-        // Get next position in cycle
-        int nextIndex = (currentIndex + 1) % hamiltonianCycle.size();
-        Point nextPos = hamiltonianCycle.get(nextIndex);
-
-        // Validate safety
-        if (!isMoveSafe(mySnake, nextPos, allSnakes)) {
-            return -1;
-        }
-
-        return getDirectionToPoint(head, nextPos);
-    }
-
-    private int findClosestHamiltonianPoint(Point head) {
-        int closestIndex = 0;
-        int minDistance = Integer.MAX_VALUE;
-
-        for (int i = 0; i < hamiltonianCycle.size(); i++) {
-            Point cyclePoint = hamiltonianCycle.get(i);
-            int distance = Math.abs(head.x - cyclePoint.x) + Math.abs(head.y - cyclePoint.y);
-
-            if (distance < minDistance) {
-                minDistance = distance;
-                closestIndex = i;
-            }
-        }
-
-        return closestIndex;
-    }
-
-    // ========================================================================
-    // SNAKE PARSING
-    // ========================================================================
-
-    private Snake parseSnake(String snakeLine) {
-        String[] parts = snakeLine.split(" ");
-        Snake snake = new Snake();
+        String[] parts = line.split(" ");
+        Snake s = new Snake();
 
         if (parts[0].equals("dead")) {
-            snake.alive = false;
-            return snake;
+            s.alive = false;
+            if (parts.length >= 3) {
+                s.length = Integer.parseInt(parts[1]);
+                s.kills = Integer.parseInt(parts[2]);
+            }
+            return s;
         }
 
-        snake.alive = parts[0].equals("alive");
-        snake.length = Integer.parseInt(parts[1]);
-        snake.kills = Integer.parseInt(parts[2]);
+        s.alive = parts[0].equals("alive");
+        s.length = Integer.parseInt(parts[1]);
+        s.kills = Integer.parseInt(parts[2]);
 
-        // Parse kink points
         List<Point> kinks = new ArrayList<>();
         for (int i = 3; i < parts.length; i++) {
             String[] coords = parts[i].split(",");
-            int x = Integer.parseInt(coords[0]);
-            int y = Integer.parseInt(coords[1]);
-            kinks.add(new Point(x, y));
+            if (coords.length == 2) {
+                kinks.add(new Point(Integer.parseInt(coords[0]), Integer.parseInt(coords[1])));
+            }
         }
 
-        // Reconstruct full body from kinks
-        snake.body = reconstructFullBody(kinks, snake.length);
-
-        return snake;
+        s.body = buildBody(kinks, s.length);
+        return s;
     }
 
-    /**
-     * CRITICAL: Reconstruct complete snake body from coordinate chain
-     * The game provides kink points - we must fill in all segments between them
-     */
-    private List<Point> reconstructFullBody(List<Point> kinks, int totalLength) {
+    private List<Point> buildBody(List<Point> kinks, int len) {
         if (kinks.isEmpty())
             return new ArrayList<>();
 
-        List<Point> fullBody = new ArrayList<>();
-        fullBody.add(new Point(kinks.get(0).x, kinks.get(0).y)); // Add head
+        List<Point> body = new ArrayList<>();
+        body.add(new Point(kinks.get(0).x, kinks.get(0).y));
 
-        // Reconstruct body by filling in points between kinks
         for (int i = 0; i < kinks.size() - 1; i++) {
             Point start = kinks.get(i);
             Point end = kinks.get(i + 1);
 
-            // Determine direction
             int dx = Integer.signum(end.x - start.x);
             int dy = Integer.signum(end.y - start.y);
 
-            // Fill in all points from start to end
             int x = start.x + dx;
             int y = start.y + dy;
 
-            while ((x != end.x || y != end.y) && fullBody.size() < totalLength) {
-                fullBody.add(new Point(x, y));
+            while ((x != end.x || y != end.y) && body.size() < len) {
+                body.add(new Point(x, y));
                 x += dx;
                 y += dy;
             }
 
-            // Add the kink point itself (unless it's the head)
-            if (fullBody.size() < totalLength && (i > 0 || !end.equals(kinks.get(0)))) {
-                fullBody.add(new Point(end.x, end.y));
+            if (body.size() < len && !end.equals(kinks.get(0))) {
+                body.add(new Point(end.x, end.y));
             }
 
-            if (fullBody.size() >= totalLength) {
+            if (body.size() >= len)
                 break;
-            }
         }
 
-        // Ensure exact length
-        while (fullBody.size() > totalLength) {
-            fullBody.remove(fullBody.size() - 1);
-        }
+        while (body.size() > len)
+            body.remove(body.size() - 1);
 
-        return fullBody;
+        return body;
     }
 
-    // ========================================================================
-    // DATA STRUCTURES
-    // ========================================================================
+    // NEW METHODS FOR 50ms OPTIMIZATION
+
+    // Evaluate territory control - areas we dominate
+    private int evaluateTerritoryControl(Point pos, Snake me, Snake[] all, int myIdx) {
+        int controlScore = 0;
+        int radius = 5;
+
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                Point p = new Point(pos.x + dx, pos.y + dy);
+                if (!inBounds(p))
+                    continue;
+
+                int ourDist = manhattan(pos, p);
+                int minEnemyDist = Integer.MAX_VALUE;
+
+                for (int i = 0; i < all.length; i++) {
+                    if (i == myIdx || all[i] == null || !all[i].alive || all[i].body.isEmpty())
+                        continue;
+                    Point enemyHead = all[i].body.get(0);
+                    minEnemyDist = Math.min(minEnemyDist, manhattan(enemyHead, p));
+                }
+
+                if (ourDist < minEnemyDist) {
+                    controlScore++; // We're closer to this tile than any enemy
+                }
+            }
+        }
+
+        return controlScore;
+    }
+
+    // Project future space availability after N moves
+    private int projectFutureSpace(Point pos, Snake me, Snake[] all, int myIdx, int steps) {
+        if (steps <= 0)
+            return countSpace(pos, me, all, myIdx);
+
+        // Simulate moving to pos
+        Snake virtualMe = cloneSnake(me);
+        virtualMe.body.add(0, pos);
+        if (virtualMe.body.size() > me.body.size()) {
+            virtualMe.body.remove(virtualMe.body.size() - 1);
+        }
+
+        // Find best next move
+        int maxSpace = 0;
+        for (int dir = 0; dir < 4; dir++) {
+            Point nextPos = new Point(pos.x + dx[dir], pos.y + dy[dir]);
+            if (inBounds(nextPos) && isPositionSafe(nextPos, virtualMe, all)) {
+                int futureSpace = projectFutureSpace(nextPos, virtualMe, all, myIdx, steps - 1);
+                maxSpace = Math.max(maxSpace, futureSpace);
+            }
+        }
+
+        return maxSpace;
+    }
+
+    // Check if a point is in "our territory" (closer to us than enemies)
+    private boolean isInOurTerritory(Point target, Point ourPos, Snake me, Snake[] all, int myIdx) {
+        int ourDist = manhattan(ourPos, target);
+
+        for (int i = 0; i < all.length; i++) {
+            if (i == myIdx || all[i] == null || !all[i].alive || all[i].body.isEmpty())
+                continue;
+
+            Point enemyHead = all[i].body.get(0);
+            int enemyDist = manhattan(enemyHead, target);
+
+            if (enemyDist < ourDist) {
+                return false; // Enemy is closer
+            }
+        }
+
+        return true;
+    }
+
+    // Check if position is near a wall
+    private boolean isNearWall(Point p) {
+        int edgeDist = Math.min(
+                Math.min(p.x, boardWidth - 1 - p.x),
+                Math.min(p.y, boardHeight - 1 - p.y));
+        return edgeDist <= 2;
+    }
 
     private static class Point {
         int x, y;
@@ -1094,10 +1273,10 @@ public class MyAgent extends DevelopmentAgent {
         }
 
         @Override
-        public boolean equals(Object obj) {
-            if (obj instanceof Point) {
-                Point other = (Point) obj;
-                return this.x == other.x && this.y == other.y;
+        public boolean equals(Object o) {
+            if (o instanceof Point) {
+                Point p = (Point) o;
+                return x == p.x && y == p.y;
             }
             return false;
         }
@@ -1106,11 +1285,6 @@ public class MyAgent extends DevelopmentAgent {
         public int hashCode() {
             return x * 1000 + y;
         }
-
-        @Override
-        public String toString() {
-            return "(" + x + "," + y + ")";
-        }
     }
 
     private static class Snake {
@@ -1118,11 +1292,22 @@ public class MyAgent extends DevelopmentAgent {
         int length = 0;
         int kills = 0;
         List<Point> body = new ArrayList<>();
+    }
 
-        @Override
-        public String toString() {
-            return String.format("Snake[alive=%s, length=%d, kills=%d, head=%s]",
-                    alive, length, kills, body.isEmpty() ? "none" : body.get(0));
+    private static class SnakeProfile {
+        int size;
+        int kills;
+    }
+
+    private static class PathNode {
+        Point p;
+        int g;
+        int f;
+
+        PathNode(Point p, int g, int h) {
+            this.p = p;
+            this.g = g;
+            this.f = g + h;
         }
     }
 }

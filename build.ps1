@@ -19,7 +19,7 @@ if ($LASTEXITCODE -eq 0) {
     
     # Create JAR file
     Write-Host "Creating JAR file..." -ForegroundColor Yellow
-    jar cfm MyAgent.jar manifest.txt MyAgent.class MyAgent`$Point.class MyAgent`$Snake.class MyAgent`$OpponentProfile.class MyAgent`$RiskAssessment.class
+    jar cfm MyAgent.jar manifest.txt MyAgent.class MyAgent`$Point.class MyAgent`$Snake.class MyAgent`$SnakeProfile.class MyAgent`$PathNode.class
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ JAR created successfully!" -ForegroundColor Green
@@ -30,10 +30,12 @@ if ($LASTEXITCODE -eq 0) {
         
         Write-Host "✅ Copied to submissions/MyAgent_$timestamp.jar" -ForegroundColor Green
         Write-Host "🎮 Ready to submit!" -ForegroundColor Cyan
-    } else {
+    }
+    else {
         Write-Host "❌ JAR creation failed!" -ForegroundColor Red
     }
-} else {
+}
+else {
     Write-Host "❌ Compilation failed!" -ForegroundColor Red
 }
 

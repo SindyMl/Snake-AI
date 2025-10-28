@@ -3,6 +3,13 @@
     "configurations": [
         {
             "type": "java",
+            "name": "MyAgent",
+            "request": "launch",
+            "mainClass": "MyAgent",
+            "projectName": "Snake-AI_25bbcede"
+        },
+        {
+            "type": "java",
             "name": "Launch MyAgent",
             "request": "launch",
             "mainClass": "MyAgent",
