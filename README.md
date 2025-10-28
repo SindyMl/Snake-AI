@@ -71,7 +71,7 @@ Snake-AI/
 
 ## Top Performing Agents
 
-###  3rd Place: Snake-AI.jar
+###  1st Place: MyAgent.java
 **Source:** `src/MyAgent.java`  `submissions/Snake-AI.jar`
 
 **Stats:**
@@ -89,7 +89,7 @@ Snake-AI/
 - 78% survival, 2.8 avg kills, max 105 segments
 - Fast BFS, strong defense
 
-###  1st: MyAgent.jar  
+###  3rd: Snake_AI.jar
 - 72% survival, 2.1 avg kills, max 92 segments
 - Reliable space management
 
